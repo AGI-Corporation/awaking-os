@@ -1,3 +1,5 @@
+[![Awaking OS Cosmic Boot Banner](./assets/awaking-cosmic-boot.svg)](https://github.com/AGI-Corporation/awaking-os)
+
 # Awaking OS: The Post-AGI Metasystem
 
 <div align="center">
