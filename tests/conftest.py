@@ -10,6 +10,12 @@ from awaking_os.agents.base import EchoAgent
 from awaking_os.agents.biotic import BioticAgent
 from awaking_os.agents.research import ResearchAgent
 from awaking_os.agents.semantic import SemanticAgent
+from awaking_os.consciousness import (
+    EthicalFilter,
+    GlobalWorkspace,
+    MCLayer,
+    PhiCalculator,
+)
 from awaking_os.io.search import SearchHit, StubSearchTool
 from awaking_os.kernel import AgentRegistry, AKernel, IACBus
 from awaking_os.llm.provider import FakeLLMProvider, LLMProvider
@@ -135,3 +141,31 @@ def research_agent(
     fake_llm: LLMProvider, stub_search: StubSearchTool, semantic_agi_ram: AGIRam
 ) -> ResearchAgent:
     return ResearchAgent(llm=fake_llm, search=stub_search, agi_ram=semantic_agi_ram)
+
+
+@pytest.fixture
+def phi_calculator() -> PhiCalculator:
+    return PhiCalculator()
+
+
+@pytest.fixture
+def ethical_filter() -> EthicalFilter:
+    return EthicalFilter()
+
+
+@pytest.fixture
+def global_workspace() -> GlobalWorkspace:
+    return GlobalWorkspace()
+
+
+@pytest.fixture
+def mc_layer(
+    phi_calculator: PhiCalculator,
+    ethical_filter: EthicalFilter,
+    global_workspace: GlobalWorkspace,
+) -> MCLayer:
+    return MCLayer(
+        phi_calculator=phi_calculator,
+        ethical_filter=ethical_filter,
+        global_workspace=global_workspace,
+    )

@@ -13,6 +13,12 @@ import typer
 from awaking_os import __version__
 from awaking_os.agents import BioticAgent, ExecutiveAgent, ResearchAgent, SemanticAgent
 from awaking_os.config import AwakingSettings
+from awaking_os.consciousness import (
+    EthicalFilter,
+    GlobalWorkspace,
+    MCLayer,
+    PhiCalculator,
+)
 from awaking_os.io.search import StubSearchTool
 from awaking_os.kernel import AgentRegistry, AKernel, IACBus
 from awaking_os.kernel.task import AgentTask
@@ -93,6 +99,11 @@ async def _submit_and_run(
         embedding_provider=FakeEmbeddingProvider(),
     )
     llm = _build_llm(use_fake_llm)
+    mc_layer = MCLayer(
+        phi_calculator=PhiCalculator(),
+        ethical_filter=EthicalFilter(),
+        global_workspace=GlobalWorkspace(),
+    )
 
     # Kernel needs the registry; registry needs kernel.submit (for ExecutiveAgent).
     # Build the kernel with an empty registry, then attach.
@@ -102,6 +113,7 @@ async def _submit_and_run(
         bus=bus,
         agi_ram=agi_ram,
         dispatch_timeout_s=settings.kernel_dispatch_timeout_s,
+        mc_layer=mc_layer,
     )
     for agent in _build_registry(agi_ram, llm, kernel).all():
         registry.register(agent)
