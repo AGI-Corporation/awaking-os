@@ -5,16 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from uuid import uuid4
 
 import typer
 
 from awaking_os import __version__
-from awaking_os.agents.base import EchoAgent
+from awaking_os.agents import EchoAgent, SemanticAgent
+from awaking_os.agents.base import Agent
 from awaking_os.config import AwakingSettings
 from awaking_os.kernel import AgentRegistry, AKernel, IACBus
 from awaking_os.kernel.task import AgentTask
+from awaking_os.llm import AnthropicProvider, FakeLLMProvider, LLMProvider
 from awaking_os.memory.agi_ram import AGIRam
+from awaking_os.memory.embeddings import FakeEmbeddingProvider
+from awaking_os.memory.vector_store import InMemoryVectorStore
 from awaking_os.types import AgentType
 
 app = typer.Typer(help="Awaking OS — Post-AGI Metasystem CLI")
@@ -31,6 +36,11 @@ def submit(
     agent_type: AgentType = typer.Option(AgentType.SEMANTIC, "--type", "-t"),
     priority: int = typer.Option(50, "--priority", "-p", min=0, max=100),
     payload: str = typer.Option("{}", "--payload", help="JSON payload for the task"),
+    use_fake_llm: bool = typer.Option(
+        False,
+        "--fake-llm/--real-llm",
+        help="Force the deterministic FakeLLMProvider (default: auto — real if ANTHROPIC_API_KEY set)",
+    ),
 ) -> None:
     """Submit a single task to the kernel and print the result."""
     settings = AwakingSettings()
@@ -48,8 +58,22 @@ def submit(
             priority=priority,
             payload=payload_obj,
             settings=settings,
+            use_fake_llm=use_fake_llm,
         )
     )
+
+
+def _build_llm(use_fake_llm: bool) -> LLMProvider:
+    if use_fake_llm or not os.environ.get("ANTHROPIC_API_KEY"):
+        return FakeLLMProvider(default_response="[fake llm — set ANTHROPIC_API_KEY for real]")
+    return AnthropicProvider()
+
+
+def _build_agent(agent_type: AgentType, agi_ram: AGIRam, llm: LLMProvider) -> Agent:
+    if agent_type == AgentType.SEMANTIC:
+        return SemanticAgent(llm=llm, agi_ram=agi_ram)
+    # Other agent types arrive in PR 4. EchoAgent acts as a placeholder for now.
+    return EchoAgent(agi_ram=agi_ram, agent_type=agent_type)
 
 
 async def _submit_and_run(
@@ -57,11 +81,19 @@ async def _submit_and_run(
     priority: int,
     payload: dict,
     settings: AwakingSettings,
+    use_fake_llm: bool,
 ) -> None:
     bus = IACBus()
-    agi_ram = AGIRam(db_path=settings.data_dir / "agi_ram.sqlite")
+    agi_ram = AGIRam(
+        db_path=settings.data_dir / "agi_ram.sqlite",
+        vector_store=InMemoryVectorStore(),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    llm = _build_llm(use_fake_llm)
+
     registry = AgentRegistry()
-    registry.register(EchoAgent(agi_ram=agi_ram, agent_type=agent_type))
+    registry.register(_build_agent(agent_type, agi_ram, llm))
+
     kernel = AKernel(
         registry=registry,
         bus=bus,

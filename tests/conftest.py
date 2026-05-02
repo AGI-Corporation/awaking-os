@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from awaking_os.agents.base import EchoAgent
+from awaking_os.agents.semantic import SemanticAgent
 from awaking_os.kernel import AgentRegistry, AKernel, IACBus
+from awaking_os.llm.provider import FakeLLMProvider, LLMProvider
 from awaking_os.memory.agi_ram import AGIRam
 from awaking_os.memory.desci import DeSciSigner
 from awaking_os.memory.embeddings import EmbeddingProvider, FakeEmbeddingProvider
@@ -81,3 +83,13 @@ def registry_with_echo(agi_ram: AGIRam) -> AgentRegistry:
 @pytest.fixture
 def kernel(registry_with_echo: AgentRegistry, bus: IACBus, agi_ram: AGIRam) -> AKernel:
     return AKernel(registry=registry_with_echo, bus=bus, agi_ram=agi_ram)
+
+
+@pytest.fixture
+def fake_llm() -> FakeLLMProvider:
+    return FakeLLMProvider(default_response="42")
+
+
+@pytest.fixture
+def semantic_agent(fake_llm: LLMProvider, semantic_agi_ram: AGIRam) -> SemanticAgent:
+    return SemanticAgent(llm=fake_llm, agi_ram=semantic_agi_ram)

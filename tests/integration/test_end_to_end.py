@@ -73,12 +73,14 @@ def test_cli_submit_runs_end_to_end(tmp_path) -> None:
             "50",
             "--payload",
             '{"q": "hello"}',
+            "--fake-llm",
         ],
         env={"AWAKING_DATA_DIR": str(tmp_path / "awaking")},
     )
     assert result.exit_code == 0, result.stdout
-    assert '"echo"' in result.stdout
-    assert '"hello"' in result.stdout
+    # SemanticAgent (with FakeLLMProvider) returns an "answer" field.
+    assert '"answer"' in result.stdout
+    assert '"agent_id": "semantic-1"' in result.stdout
 
 
 def test_cli_version() -> None:
