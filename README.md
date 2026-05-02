@@ -197,12 +197,13 @@ Agents (Semantic, Biotic, Exec, Research): ████████████�
 Consciousness Layer (Phi, Ethics, GW, MC): ████████████████████ 100%
 Bio-signal feature extraction:        ████████████████████ 100%
 Simulation engine (Sandbox + Hypothesis): ████████████████████ 100%
+Min-cut Phi (exact for n ≤ 6):        ████████████████████ 100%
+Sqlite LLM response cache:            ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
-Real Phi (PyPhi-grade):               ░░░░░░░░░░░░░░░░░░░░   0%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                255 passing (96% line coverage)
+Tests:                281 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -210,7 +211,12 @@ Bio-signal features:  FFT (dominant freq, spectral entropy, band powers)
                       + dinucleotide k-mer counts + entropy
 Simulation engine:    Sandbox provisions ephemeral kernel + agents per
                       experiment; Hypothesis/Expectation evaluator
-LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or Fake
+Phi calculators:      Spectral entropy (any N) + exact min-cut (n ≤ 6,
+                      brute-force bipartitions); both drop into MCLayer
+LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or
+                      Fake; CachingLLMProvider memoizes responses to a
+                      sqlite cache (keyed by system + messages + max_tokens
+                      + model, optional TTL)
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at
