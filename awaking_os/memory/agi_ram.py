@@ -33,11 +33,17 @@ class AGIRam:
         vector_store: VectorStore | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         signer: object | None = None,  # DeSciSigner; kept loose to avoid import cycle
+        publisher: object | None = None,  # OnChainPublisher; loose for the same reason
     ) -> None:
         self.graph = NetworkXKnowledgeGraph(db_path=db_path)
         self.vector_store = vector_store
         self.embedding_provider = embedding_provider
         self.signer = signer
+        self.publisher = publisher
+        # Records publication receipts keyed by node_id, populated as
+        # store()'s background publish completes. Useful for tests and
+        # for callers that want to surface chain receipts in their UI.
+        self.receipts: dict[str, object] = {}
 
     @property
     def semantic_enabled(self) -> bool:
@@ -48,7 +54,11 @@ class AGIRam:
 
         If the vector-store upsert fails, the graph add is rolled back so
         the two stores never drift. The original exception is re-raised
-        so callers see the failure.
+        so callers see the failure. After a successful store, if a
+        ``publisher`` is wired AND the node has an attestation, the
+        attestation is published on-chain (the JSONL chain by default).
+        Publication failures are logged but never propagate — the store
+        succeeds even when the chain is offline.
         """
         if node.embedding is None and self.embedding_provider is not None:
             node.embedding = await self.embedding_provider.embed(node.content)
@@ -73,6 +83,15 @@ class AGIRam:
                         node_id,
                     )
                 raise
+
+        if self.publisher is not None and node.attestation is not None:
+            try:
+                receipt = await self.publisher.publish(node.attestation)  # type: ignore[attr-defined]
+                self.receipts[node_id] = receipt
+            except Exception:
+                # Publication is a best-effort step — never fail the
+                # store on a chain hiccup. Caller can re-publish later.
+                logger.exception("Failed to publish attestation for node %s", node_id)
         return node_id
 
     async def get(self, node_id: str) -> KnowledgeNode | None:

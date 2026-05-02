@@ -206,11 +206,12 @@ Bio-signal feature extraction:        ██████████████
 Simulation engine (Sandbox + Hypothesis): ████████████████████ 100%
 Min-cut Phi (exact for n ≤ 6):        ████████████████████ 100%
 Sqlite LLM response cache:            ████████████████████ 100%
+On-chain DeSci publication (local JSONL): ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
-On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
+On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                304 passing (96% line coverage)
+Tests:                323 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -226,6 +227,12 @@ LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or
                       + model, optional TTL); LLMEthicalGrader plugs into
                       the EthicalFilter via min-combine for an LLM-backed
                       alignment scorer that rules-floor can't be exceeded
+DeSci publication:    LocalJSONLPublisher gives every attestation real
+                      chain semantics — sequential block_height,
+                      content-addressed tx_hash, prev_hash linkage. Tamper
+                      with any block and verify_chain() returns False.
+                      OnChainPublisher ABC means a real-chain backend
+                      (Ethereum / Polygon) drops in without touching AGIRam.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at

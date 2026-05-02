@@ -222,3 +222,93 @@ async def test_rollback_does_not_swallow_original_error(embedding_provider) -> N
 
     with pytest.raises(RuntimeError, match="simulated upsert failure"):
         await ram.store(_node("doomed"))
+
+
+# --- on-chain publication wiring (Phase C.1) ---------------------------------
+
+
+async def test_store_publishes_attestation_when_publisher_wired(
+    embedding_provider, vector_store, tmp_path
+) -> None:
+    """AGIRam with a signer + publisher publishes the attestation after
+    a successful store. The receipt is recorded in ram.receipts."""
+    from awaking_os.memory.onchain import LocalJSONLPublisher
+
+    signer = DeSciSigner.from_seed(b"\x00" * 32)
+    publisher = LocalJSONLPublisher(tmp_path / "chain.jsonl")
+    ram = AGIRam(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        signer=signer,
+        publisher=publisher,
+    )
+
+    nid = await ram.store(_node("publish me"))
+    assert nid in ram.receipts
+    receipt = ram.receipts[nid]
+    assert receipt.block_height == 0
+    assert publisher.block_count() == 1
+
+
+async def test_store_does_not_publish_without_signer(
+    embedding_provider, vector_store, tmp_path
+) -> None:
+    """No signer → no attestation → nothing to publish."""
+    from awaking_os.memory.onchain import LocalJSONLPublisher
+
+    publisher = LocalJSONLPublisher(tmp_path / "chain.jsonl")
+    ram = AGIRam(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        publisher=publisher,  # but no signer
+    )
+    nid = await ram.store(_node("no sig"))
+    assert nid not in ram.receipts
+    assert publisher.block_count() == 0
+
+
+async def test_store_succeeds_when_publisher_fails(embedding_provider, vector_store) -> None:
+    """Publication is best-effort; a broken publisher must not fail store()."""
+
+    class _BrokenPublisher:
+        async def publish(self, attestation):
+            raise RuntimeError("chain offline")
+
+        async def find(self, node_hash):
+            return None
+
+        async def verify_chain(self):
+            return False
+
+    signer = DeSciSigner.from_seed(b"\x00" * 32)
+    ram = AGIRam(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        signer=signer,
+        publisher=_BrokenPublisher(),
+    )
+    nid = await ram.store(_node("survives chain failure"))
+    # Store still succeeded — node is in the graph + vector store.
+    assert nid in ram.graph
+    # But no receipt was recorded.
+    assert nid not in ram.receipts
+
+
+async def test_published_chain_is_verifiable_after_multiple_stores(
+    embedding_provider, vector_store, tmp_path
+) -> None:
+    from awaking_os.memory.onchain import LocalJSONLPublisher
+
+    signer = DeSciSigner.from_seed(b"\x00" * 32)
+    publisher = LocalJSONLPublisher(tmp_path / "chain.jsonl")
+    ram = AGIRam(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        signer=signer,
+        publisher=publisher,
+    )
+    for i in range(4):
+        await ram.store(_node(f"node-{i}"))
+
+    assert publisher.block_count() == 4
+    assert await publisher.verify_chain() is True
