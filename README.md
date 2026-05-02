@@ -59,8 +59,8 @@
 | 🤖 **Agent Kernel** | `awaking_os.kernel` | ✅ Implemented |
 | 🧠 **Consciousness Layer** | `awaking_os.consciousness` | ✅ Implemented |
 | 🧬 **Memory + DeSci** | `awaking_os.memory` (Chroma + ed25519) | ✅ Implemented (DeSci is a local-signing stub) |
-| 🌐 **Bio I/O + External APIs** | `awaking_os.io` (mock streams + token-bucket gateway) | ✅ Mock streams + real rate-limiter |
-| 🌐 **Simulation Engine** | — | 📋 Future |
+| 🌐 **Bio I/O + External APIs** | `awaking_os.io` (mock streams + FFT/k-mer features + token-bucket gateway) | ✅ Implemented |
+| 🧪 **Simulation Engine** | `awaking_os.simulation` (Sandbox + Hypothesis/Expectation evaluator) | ✅ Implemented |
 
 ---
 
@@ -190,23 +190,26 @@ hits = await agi_ram.retrieve("integration", k=5)
 
 ## 📈 Key Metrics & KPIs
 
-```
+```text
 Foundation (kernel, bus, memory):    ████████████████████ 100%
 Embeddings + Vector Store + DeSci:   ████████████████████ 100%
 Agents (Semantic, Biotic, Exec, Research): ████████████████████ 100%
 Consciousness Layer (Phi, Ethics, GW, MC): ████████████████████ 100%
 Bio-signal feature extraction:        ████████████████████ 100%
+Simulation engine (Sandbox + Hypothesis): ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Real Phi (PyPhi-grade):               ░░░░░░░░░░░░░░░░░░░░   0%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                237 passing (96% line coverage)
+Tests:                255 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
 Bio-signal features:  FFT (dominant freq, spectral entropy, band powers)
                       + dinucleotide k-mer counts + entropy
+Simulation engine:    Sandbox provisions ephemeral kernel + agents per
+                      experiment; Hypothesis/Expectation evaluator
 LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or Fake
 ```
 
@@ -246,6 +249,9 @@ awaking-os version
 
 # Run the end-to-end demo (no API key needed)
 python examples/awaking_demo.py
+
+# Run the simulation-engine demo — three isolated experiments with hypothesis evaluation
+python examples/experiment_demo.py
 ```
 
 For a real LLM, set `ANTHROPIC_API_KEY` (the CLI will pick it up automatically). To use sentence-transformer embeddings instead of the deterministic fake, install the `ml` extra: `pip install -e ".[dev,ml]"`.
