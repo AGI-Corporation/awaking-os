@@ -36,6 +36,20 @@ def test_rate_limiter_rejects_zero_rate() -> None:
         RateLimiter(rate_per_minute=0)
 
 
+async def test_rate_limiter_rejects_oversized_acquire() -> None:
+    rl = RateLimiter(rate_per_minute=60, capacity=2)
+    with pytest.raises(ValueError, match="exceeds bucket capacity"):
+        await rl.acquire(tokens=10)
+
+
+async def test_rate_limiter_rejects_non_positive_acquire() -> None:
+    rl = RateLimiter(rate_per_minute=60)
+    with pytest.raises(ValueError):
+        await rl.acquire(tokens=0)
+    with pytest.raises(ValueError):
+        await rl.acquire(tokens=-1)
+
+
 # --- ExternalAPIGateway --------------------------------------------------------
 
 
@@ -141,6 +155,31 @@ async def test_call_propagates_http_errors() -> None:
     gateway = ExternalAPIGateway(services=[_service()], http_client=_mock_transport(handler))
     with pytest.raises(httpx.HTTPStatusError):
         await gateway.call("echo", "/x")
+
+
+async def test_call_handles_204_no_content() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(204)
+
+    gateway = ExternalAPIGateway(services=[_service()], http_client=_mock_transport(handler))
+    assert await gateway.call("echo", "/delete") == {}
+
+
+async def test_call_handles_empty_body() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"")
+
+    gateway = ExternalAPIGateway(services=[_service()], http_client=_mock_transport(handler))
+    assert await gateway.call("echo", "/health") == {}
+
+
+async def test_call_returns_raw_text_for_non_json_response() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="plain text", headers={"content-type": "text/plain"})
+
+    gateway = ExternalAPIGateway(services=[_service()], http_client=_mock_transport(handler))
+    result = await gateway.call("echo", "/x")
+    assert result == {"_raw": "plain text", "_content_type": "text/plain"}
 
 
 async def test_rate_limiting_serializes_calls() -> None:

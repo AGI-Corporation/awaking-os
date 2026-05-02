@@ -81,6 +81,18 @@ async def test_llm_grader_clamped_to_unit_interval() -> None:
     assert ev.llm_score == 1.0
 
 
+async def test_llm_grader_exception_degrades_to_rule_only() -> None:
+    async def broken_grader(_: str) -> float:
+        raise RuntimeError("grader unreachable")
+
+    f = EthicalFilter(rules=[], llm_grader=broken_grader)
+    ev = await f.evaluate("benign content")
+    # Grader failed → llm_score is None; alignment falls back to rule score (1.0).
+    assert ev.llm_score is None
+    assert ev.alignment_score == 1.0
+    assert ev.rule_score == 1.0
+
+
 async def test_custom_rules_override_defaults() -> None:
     rules = [
         EthicalRule(

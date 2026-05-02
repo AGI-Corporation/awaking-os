@@ -53,10 +53,33 @@ async def test_build_context_uses_memory(kernel: AKernel, agi_ram: AGIRam) -> No
     from awaking_os.memory.node import KnowledgeNode
 
     await agi_ram.store(KnowledgeNode(content="ping pong", created_by="test"))
+    # Empty payload → kernel falls back to task.id as the memory query.
     task = _task(payload={})
-    task.id = "ping"  # bus.query_memory uses task.id as the search query
+    task.id = "ping"
     ctx = await kernel.build_context(task)
     assert any("ping" in n.content for n in ctx.memory)
+
+
+async def test_build_context_keys_off_payload_content(kernel: AKernel, agi_ram: AGIRam) -> None:
+    from awaking_os.memory.node import KnowledgeNode
+
+    # Regression: querying memory by random task UUID never matches anything;
+    # the kernel must derive the query from the payload's q/query/topic/goal.
+    await agi_ram.store(KnowledgeNode(content="alpha bravo", created_by="test"))
+    task = _task(payload={"q": "alpha"})
+    ctx = await kernel.build_context(task)
+    assert any("alpha" in n.content for n in ctx.memory)
+
+
+async def test_build_context_payload_topic_used_for_memory_query(
+    kernel: AKernel, agi_ram: AGIRam
+) -> None:
+    from awaking_os.memory.node import KnowledgeNode
+
+    await agi_ram.store(KnowledgeNode(content="cetacean signaling", created_by="test"))
+    task = _task(payload={"topic": "cetacean"})
+    ctx = await kernel.build_context(task)
+    assert any("cetacean" in n.content for n in ctx.memory)
 
 
 async def test_dispatch_unknown_agent_type_raises(bus: IACBus, agi_ram: AGIRam) -> None:

@@ -114,8 +114,12 @@ class EthicalFilter:
         rule_score, threat, triggered = self.evaluate_rules(content)
         llm_score: float | None = None
         if self.llm_grader is not None:
-            llm_score = await self.llm_grader(content)
-            llm_score = max(0.0, min(1.0, llm_score))
+            try:
+                raw_score = await self.llm_grader(content)
+                llm_score = max(0.0, min(1.0, float(raw_score)))
+            except Exception:
+                # Grader failures degrade to rule-only scoring; do not break the pipeline.
+                llm_score = None
         # Combine: take the more pessimistic of the two when LLM grader is present
         alignment = rule_score if llm_score is None else min(rule_score, llm_score)
         return EthicalEvaluation(

@@ -72,6 +72,36 @@ async def test_query_memory_uses_attached_provider(bus: IACBus, in_memory_agi_ra
     assert any(n.id == node_id for n in results)
 
 
+async def test_publish_does_not_block_on_slow_subscribers(bus: IACBus) -> None:
+    """A full subscriber queue must not delay delivery to other subscribers
+    on the same topic (the bus's stated 'slow consumers don't block others'
+    guarantee)."""
+    fast_received: list[_Msg] = []
+
+    # Pre-fill a tiny queue to make one subscriber 'slow'.
+    slow_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+    await slow_queue.put(_Msg(text="filler"))
+    bus._subscribers.setdefault("topic.slow", []).append(slow_queue)
+
+    async def fast_consume() -> None:
+        async for msg in bus.subscribe("topic.slow"):
+            fast_received.append(msg)
+            return
+
+    fast = asyncio.create_task(fast_consume())
+    await asyncio.sleep(0)
+
+    publish = asyncio.create_task(bus.publish("topic.slow", _Msg(text="hi")))
+    # Give the fast consumer time to receive its copy.
+    await asyncio.wait_for(fast, timeout=1.0)
+    assert fast_received == [_Msg(text="hi")]
+
+    # Drain the slow queue so publish() resolves before the test ends.
+    await slow_queue.get()
+    await slow_queue.get()
+    await asyncio.wait_for(publish, timeout=1.0)
+
+
 @pytest.mark.parametrize("count", [1, 5])
 async def test_subscribe_is_cleaned_up_when_consumer_exits(bus: IACBus, count: int) -> None:
     async def consume_once() -> None:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from awaking_os.agents.base import Agent
 from awaking_os.agents.personas import PERSONAS, Persona
 from awaking_os.kernel.task import AgentContext, AgentResult
@@ -102,7 +100,7 @@ class SemanticAgent(Agent):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 return value
-        return json.dumps(payload, sort_keys=True)
+        raise ValueError("SemanticAgent payload requires a q/query/question/content string")
 
     @staticmethod
     def _resolve_persona(payload: dict) -> Persona | None:

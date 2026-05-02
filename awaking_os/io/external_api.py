@@ -47,6 +47,12 @@ class RateLimiter:
         self._lock = asyncio.Lock()
 
     async def acquire(self, tokens: float = 1.0) -> None:
+        if tokens <= 0:
+            raise ValueError("tokens must be positive")
+        if tokens > self._capacity:
+            # The bucket can never reach this many tokens — fail fast rather than
+            # spin forever waiting for an unreachable refill.
+            raise ValueError(f"requested {tokens} tokens exceeds bucket capacity {self._capacity}")
         async with self._lock:
             while True:
                 now = time.monotonic()
@@ -141,6 +147,13 @@ class ExternalAPIGateway:
             timeout=service.timeout_seconds,
         )
         response.raise_for_status()
+        # 204 No Content and other empty bodies are valid success responses
+        # (DELETE / health / fire-and-forget endpoints). Don't try to decode JSON.
+        if response.status_code == 204 or not response.content:
+            return {}
+        content_type = response.headers.get("content-type", "")
+        if "json" not in content_type.lower():
+            return {"_raw": response.text, "_content_type": content_type}
         return response.json()
 
     async def aclose(self) -> None:

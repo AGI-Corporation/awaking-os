@@ -61,12 +61,24 @@ class AKernel:
         return task.id
 
     async def build_context(self, task: AgentTask) -> AgentContext:
-        memory = await self.bus.query_memory(task.id)
+        # Memory retrieval keys off the task's content, not its UUID — querying
+        # by id would never match anything in AGI-RAM. Fall through several
+        # common payload keys and fall back to the id as a last resort.
+        query = self._memory_query_for(task)
+        memory = await self.bus.query_memory(query)
         return AgentContext(
             task=task,
             memory=memory,
             ethical_boundary=task.ethical_constraints,
         )
+
+    @staticmethod
+    def _memory_query_for(task: AgentTask) -> str:
+        for key in ("q", "query", "question", "topic", "goal", "content"):
+            value = task.payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return task.id
 
     async def dispatch(self, task: AgentTask) -> AgentResult:
         agent = self.registry.get(task.agent_type)

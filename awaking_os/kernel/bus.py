@@ -30,8 +30,13 @@ class IACBus:
         self._memory_provider = agi_ram
 
     async def publish(self, topic: str, message: BaseModel) -> None:
-        for q in self._subscribers.get(topic, []):
-            await q.put(message)
+        # Snapshot the subscriber list and fan out concurrently — a slow or
+        # full subscriber must not block delivery to the others (this is the
+        # "slow consumers don't block others" guarantee in the class docstring).
+        queues = list(self._subscribers.get(topic, []))
+        if not queues:
+            return
+        await asyncio.gather(*(q.put(message) for q in queues))
 
     async def subscribe(self, topic: str) -> AsyncIterator[BaseModel]:
         queue: asyncio.Queue[BaseModel] = asyncio.Queue(maxsize=self._max_queue_size)

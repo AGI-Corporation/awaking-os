@@ -124,8 +124,20 @@ async def _submit_and_run(
         agent_type=agent_type,
         payload=payload,
     )
-    result = await kernel.dispatch(task)
-    typer.echo(result.model_dump_json(indent=2))
+
+    # Start the dispatch loop so that any sub-tasks submitted by the top-level
+    # agent (notably ExecutiveAgent) are actually picked up and run.
+    kernel.start()
+    try:
+        result = await kernel.dispatch(task)
+        # Wait for the queue to drain — bounded so we don't hang forever.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + settings.kernel_dispatch_timeout_s
+        while kernel.pending_count > 0 and loop.time() < deadline:
+            await asyncio.sleep(0.01)
+        typer.echo(result.model_dump_json(indent=2))
+    finally:
+        await kernel.shutdown()
 
 
 if __name__ == "__main__":

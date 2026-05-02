@@ -51,7 +51,10 @@ async def test_submit_dispatch_writes_node_and_publishes_result() -> None:
     )
     kernel.start()
 
+    deadline = asyncio.get_running_loop().time() + 2.0
     while kernel.pending_count > 0:
+        if asyncio.get_running_loop().time() > deadline:
+            raise TimeoutError("kernel did not drain in time")
         await asyncio.sleep(0.01)
     await asyncio.wait_for(consumer_task, timeout=2.0)
     await kernel.shutdown()
@@ -96,6 +99,28 @@ def test_cli_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert result.stdout.strip()  # non-empty
+
+
+def test_cli_executive_runs_subtasks(tmp_path) -> None:
+    """Regression: ExecutiveAgent submits sub-tasks via kernel.submit;
+    the CLI must run the dispatch loop so they actually execute."""
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "submit",
+            "--type",
+            "executive",
+            "--payload",
+            '{"goal": "investigate cetacean signaling"}',
+            "--fake-llm",
+        ],
+        env={"AWAKING_DATA_DIR": str(tmp_path / "awaking")},
+    )
+    assert result.exit_code == 0, result.stdout
+    # Executive's own result is what's printed; the sub-task IDs appear in it.
+    assert '"agent_id": "executive-1"' in result.stdout
+    assert '"subtask_ids"' in result.stdout
 
 
 async def test_mc_report_published_after_dispatch() -> None:

@@ -62,6 +62,12 @@ def test_non_square_raises(phi_calculator: PhiCalculator) -> None:
         phi_calculator.calculate(matrix)
 
 
+def test_one_by_n_raises(phi_calculator: PhiCalculator) -> None:
+    # Regression: previously short-circuited to 0.0 because len(matrix) < 2.
+    with pytest.raises(ValueError):
+        phi_calculator.calculate([[1.0, 2.0]])
+
+
 def test_returns_float(phi_calculator: PhiCalculator) -> None:
     phi = phi_calculator.calculate([[1.0, 0.5], [0.5, 1.0]])
     assert isinstance(phi, float)

@@ -114,12 +114,11 @@ async def test_payload_extraction_falls_back_through_keys(
     assert "via question key" in fake_llm.calls[-1].messages[0]["content"]
 
 
-async def test_payload_with_no_recognized_key_serializes_payload(
-    semantic_agent: SemanticAgent, fake_llm: FakeLLMProvider
+async def test_payload_without_recognized_key_raises(
+    semantic_agent: SemanticAgent,
 ) -> None:
-    await semantic_agent.execute(_ctx(_task({"foo": "bar", "baz": 1})))
-    content = fake_llm.calls[-1].messages[0]["content"]
-    assert '"foo"' in content and '"bar"' in content
+    with pytest.raises(ValueError, match="q/query/question/content"):
+        await semantic_agent.execute(_ctx(_task({"foo": "bar", "baz": 1})))
 
 
 async def test_max_tokens_passed_through(semantic_agi_ram: AGIRam) -> None:

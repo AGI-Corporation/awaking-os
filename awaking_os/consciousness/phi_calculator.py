@@ -21,10 +21,12 @@ import numpy as np
 
 class PhiCalculator:
     def calculate(self, matrix: list[list[float]]) -> float:
-        if not matrix or len(matrix) < 2:
+        if not matrix:
             return 0.0
 
         m = np.asarray(matrix, dtype=float)
+        if m.size == 0:
+            return 0.0
         if m.ndim != 2 or m.shape[0] != m.shape[1]:
             raise ValueError("integration_matrix must be square 2D")
         if m.shape[0] < 2:
