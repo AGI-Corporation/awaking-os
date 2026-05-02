@@ -54,6 +54,9 @@ class AKernel:
         self._stopping = asyncio.Event()
         self._run_task: asyncio.Task[None] | None = None
         self._recent_results: deque[AgentResult] = deque(maxlen=snapshot_window)
+        # task_id → (producing agent_id, parent_task_id from payload). Sized to
+        # the snapshot window so it doesn't grow unbounded.
+        self._task_meta: deque[tuple[str, str, str | None]] = deque(maxlen=snapshot_window * 4)
         self.bus.attach_memory(agi_ram)
 
     async def submit(self, task: AgentTask) -> str:
@@ -96,6 +99,12 @@ class AKernel:
             )
         if result.elapsed_ms == 0:
             result.elapsed_ms = int((time.monotonic() - start) * 1000)
+        # Track task → (agent, parent) so the snapshot can build a richer
+        # integration matrix from real parent_task_id chains.
+        parent_id = task.payload.get("parent_task_id")
+        if not isinstance(parent_id, str):
+            parent_id = None
+        self._task_meta.append((task.id, result.agent_id, parent_id))
         await self.bus.publish(RESULT_TOPIC, result)
         self._recent_results.append(result)
         if self.mc_layer is not None:
@@ -109,6 +118,12 @@ class AKernel:
         report = await self.mc_layer.monitor(snapshot)  # type: ignore[union-attr]
         await self.bus.publish(MC_REPORT_TOPIC, report)
 
+    # Edge weights for the integration matrix. Parent chains are a real
+    # causal signal (ExecutiveAgent submitted this sub-task), so they're
+    # weighted higher than mere temporal adjacency.
+    _PARENT_EDGE_WEIGHT = 2.0
+    _CONSECUTIVE_EDGE_WEIGHT = 1.0
+
     def _build_snapshot(self) -> SystemSnapshot:
         from awaking_os.consciousness.snapshot import SystemSnapshot
 
@@ -120,14 +135,30 @@ class AKernel:
 
         n = len(agent_ids)
         matrix: list[list[float]] = [[0.0] * n for _ in range(n)] if n >= 2 else []
-        # Heuristic: consecutive results imply causal influence (i → j),
-        # since the kernel runs them in dispatch order on a single loop.
+
         if n >= 2:
             index = {aid: i for i, aid in enumerate(agent_ids)}
+
+            # Strong signal: parent_task_id chains. If task B was submitted
+            # as a sub-task of task A, the agent that handled A causally
+            # influenced the agent that handled B.
+            task_to_agent = {task_id: aid for task_id, aid, _ in self._task_meta}
+            for _task_id, child_agent, parent_id in self._task_meta:
+                if parent_id is None or parent_id not in task_to_agent:
+                    continue
+                parent_agent = task_to_agent[parent_id]
+                if parent_agent not in index or child_agent not in index:
+                    continue
+                i, j = index[parent_agent], index[child_agent]
+                if i != j:
+                    matrix[i][j] += self._PARENT_EDGE_WEIGHT
+
+            # Weaker signal: consecutive dispatch order. Useful when no
+            # parent chain exists (e.g., independent user-submitted tasks).
             for prev, curr in zip(results[:-1], results[1:], strict=True):
                 i, j = index[prev.agent_id], index[curr.agent_id]
                 if i != j:
-                    matrix[i][j] += 1.0
+                    matrix[i][j] += self._CONSECUTIVE_EDGE_WEIGHT
 
         return SystemSnapshot(
             timestamp=datetime.now(UTC),

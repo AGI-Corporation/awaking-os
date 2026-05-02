@@ -8,6 +8,7 @@ embeddings).
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from awaking_os.memory.embeddings import EmbeddingProvider
 from awaking_os.memory.knowledge_graph import NetworkXKnowledgeGraph
 from awaking_os.memory.node import KnowledgeNode
 from awaking_os.memory.vector_store import VectorStore
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"\w+")
 
@@ -41,17 +44,35 @@ class AGIRam:
         return self.vector_store is not None and self.embedding_provider is not None
 
     async def store(self, node: KnowledgeNode) -> str:
+        """Store a node atomically across the graph and vector store.
+
+        If the vector-store upsert fails, the graph add is rolled back so
+        the two stores never drift. The original exception is re-raised
+        so callers see the failure.
+        """
         if node.embedding is None and self.embedding_provider is not None:
             node.embedding = await self.embedding_provider.embed(node.content)
         if self.signer is not None and node.attestation is None:
             node.attestation = self.signer.sign(node)  # type: ignore[attr-defined]
         node_id = self.graph.add(node)
         if self.vector_store is not None and node.embedding is not None:
-            await self.vector_store.upsert(
-                node_id=node_id,
-                embedding=node.embedding,
-                metadata={"type": node.type, "created_by": node.created_by},
-            )
+            try:
+                await self.vector_store.upsert(
+                    node_id=node_id,
+                    embedding=node.embedding,
+                    metadata={"type": node.type, "created_by": node.created_by},
+                )
+            except Exception:
+                # Compensate so the graph and vector index stay in sync. If
+                # the rollback itself fails, log it but raise the original.
+                try:
+                    self.graph.remove(node_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to roll back graph node %s after vector upsert failure",
+                        node_id,
+                    )
+                raise
         return node_id
 
     async def get(self, node_id: str) -> KnowledgeNode | None:

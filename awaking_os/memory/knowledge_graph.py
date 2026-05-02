@@ -88,6 +88,53 @@ class NetworkXKnowledgeGraph:
         self._g.add_edge(source, target, key=relation, relation=relation)
         self._persist_edge(source, target, relation)
 
+    def remove(self, node_id: str) -> bool:
+        """Remove a node and all its incident edges. Returns True if it existed."""
+        if node_id not in self._g:
+            return False
+        self._g.remove_node(node_id)  # also drops all incident edges
+        if self._db_path is not None:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+                conn.execute(
+                    "DELETE FROM edges WHERE source = ? OR target = ?",
+                    (node_id, node_id),
+                )
+        return True
+
+    def unlink(self, source: str, target: str, relation: str | None = None) -> int:
+        """Remove edge(s) between source and target.
+
+        If ``relation`` is given, removes only that edge; otherwise removes
+        every edge between the two nodes. Returns the number of edges removed.
+        Missing endpoints are a no-op (returns 0).
+        """
+        if source not in self._g or target not in self._g:
+            return 0
+        if relation is not None:
+            if not self._g.has_edge(source, target, key=relation):
+                return 0
+            self._g.remove_edge(source, target, key=relation)
+            removed = 1
+            if self._db_path is not None:
+                with sqlite3.connect(self._db_path) as conn:
+                    conn.execute(
+                        "DELETE FROM edges WHERE source = ? AND target = ? AND relation = ?",
+                        (source, target, relation),
+                    )
+        else:
+            edges = list(self._g[source].get(target, {}).keys())
+            for key in edges:
+                self._g.remove_edge(source, target, key=key)
+            removed = len(edges)
+            if self._db_path is not None and removed:
+                with sqlite3.connect(self._db_path) as conn:
+                    conn.execute(
+                        "DELETE FROM edges WHERE source = ? AND target = ?",
+                        (source, target),
+                    )
+        return removed
+
     def neighbors(self, node_id: str, depth: int = 1) -> list[KnowledgeNode]:
         """BFS up to ``depth`` outgoing hops; deterministic order."""
         if node_id not in self._g:

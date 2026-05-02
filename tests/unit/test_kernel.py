@@ -133,3 +133,76 @@ async def test_dispatch_timeout_returns_error_result(bus: IACBus, agi_ram: AGIRa
     kernel = AKernel(registry=registry, bus=bus, agi_ram=agi_ram, dispatch_timeout_s=0.05)
     result = await kernel.dispatch(_task())
     assert result.output == {"error": "timeout"}
+
+
+# --- integration_matrix richness ---------------------------------------------
+
+
+def _build_two_agent_kernel(bus: IACBus, agi_ram: AGIRam) -> AKernel:
+    class TaggedAgent(Agent):
+        def __init__(self, agent_id: str, agent_type: AgentType) -> None:
+            self.agent_id = agent_id
+            self.agent_type = agent_type
+
+        async def execute(self, context: AgentContext) -> AgentResult:
+            return AgentResult(task_id=context.task.id, agent_id=self.agent_id)
+
+    registry = AgentRegistry()
+    registry.register(TaggedAgent("semantic-1", AgentType.SEMANTIC))
+    registry.register(TaggedAgent("research-1", AgentType.RESEARCH))
+    return AKernel(registry=registry, bus=bus, agi_ram=agi_ram)
+
+
+async def test_snapshot_matrix_uses_consecutive_heuristic_without_parent(
+    bus: IACBus, agi_ram: AGIRam
+) -> None:
+    kernel = _build_two_agent_kernel(bus, agi_ram)
+    await kernel.dispatch(AgentTask(id="t1", agent_type=AgentType.SEMANTIC, payload={"q": "a"}))
+    await kernel.dispatch(AgentTask(id="t2", agent_type=AgentType.RESEARCH, payload={"topic": "b"}))
+
+    snap = kernel._build_snapshot()
+    # Two agents, one consecutive edge semantic→research weighted 1.0.
+    assert snap.agent_ids == ["semantic-1", "research-1"]
+    assert snap.integration_matrix == [[0.0, 1.0], [0.0, 0.0]]
+
+
+async def test_snapshot_matrix_weights_parent_chain_higher(bus: IACBus, agi_ram: AGIRam) -> None:
+    kernel = _build_two_agent_kernel(bus, agi_ram)
+    # First task is the "parent"; second carries parent_task_id pointing to it.
+    await kernel.dispatch(
+        AgentTask(id="parent-1", agent_type=AgentType.SEMANTIC, payload={"q": "a"})
+    )
+    await kernel.dispatch(
+        AgentTask(
+            id="child-1",
+            agent_type=AgentType.RESEARCH,
+            payload={"topic": "b", "parent_task_id": "parent-1"},
+        )
+    )
+
+    snap = kernel._build_snapshot()
+    # Same edge gets both the parent weight (2.0) and the consecutive weight (1.0).
+    assert snap.integration_matrix == [[0.0, 3.0], [0.0, 0.0]]
+
+
+async def test_parent_chain_works_for_non_consecutive_tasks(bus: IACBus, agi_ram: AGIRam) -> None:
+    kernel = _build_two_agent_kernel(bus, agi_ram)
+    await kernel.dispatch(
+        AgentTask(id="parent-2", agent_type=AgentType.SEMANTIC, payload={"q": "a"})
+    )
+    # Interleave a self-edge that the consecutive heuristic ignores (i==j).
+    await kernel.dispatch(AgentTask(id="middle", agent_type=AgentType.SEMANTIC, payload={"q": "b"}))
+    await kernel.dispatch(
+        AgentTask(
+            id="child-2",
+            agent_type=AgentType.RESEARCH,
+            payload={"topic": "c", "parent_task_id": "parent-2"},
+        )
+    )
+
+    snap = kernel._build_snapshot()
+    # Parent chain still contributes 2.0 even though the parent isn't directly
+    # adjacent to the child in dispatch order.
+    sem_idx = snap.agent_ids.index("semantic-1")
+    res_idx = snap.agent_ids.index("research-1")
+    assert snap.integration_matrix[sem_idx][res_idx] >= 2.0

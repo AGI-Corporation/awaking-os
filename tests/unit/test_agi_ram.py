@@ -149,3 +149,68 @@ async def test_existing_attestation_is_preserved(
     assert fetched is not None
     assert fetched.attestation is not None
     assert fetched.attestation.public_key == other_signer.public_key_hex
+
+
+# --- atomic store rollback (PR #1 review follow-up) ---------------------------
+
+
+class _BrokenVectorStore:
+    """Minimal VectorStore stand-in whose upsert always raises."""
+
+    def __init__(self) -> None:
+        self.upsert_calls = 0
+
+    async def upsert(self, node_id, embedding, metadata=None) -> None:
+        self.upsert_calls += 1
+        raise RuntimeError("simulated upsert failure")
+
+    async def query(self, embedding, k=5):
+        return []
+
+    def count(self) -> int:
+        return 0
+
+
+async def test_store_rolls_back_graph_when_vector_upsert_fails(
+    embedding_provider,
+) -> None:
+    broken = _BrokenVectorStore()
+    ram = AGIRam(embedding_provider=embedding_provider, vector_store=broken)
+    node = _node("will fail")
+
+    with pytest.raises(RuntimeError, match="simulated upsert failure"):
+        await ram.store(node)
+
+    # The node must NOT remain in the graph after rollback.
+    assert node.id not in ram.graph
+    assert len(ram) == 0
+    assert broken.upsert_calls == 1
+
+
+async def test_store_succeeds_when_vector_store_works(semantic_agi_ram: AGIRam) -> None:
+    # Sanity: the happy path still works after the rollback wrapper.
+    nid = await semantic_agi_ram.store(_node("happy path"))
+    assert nid in semantic_agi_ram.graph
+    assert len(semantic_agi_ram) == 1
+
+
+async def test_rollback_does_not_swallow_original_error(embedding_provider) -> None:
+    """If the rollback itself fails, the original upsert error must still raise."""
+
+    class BrokenGraph:
+        def __init__(self) -> None:
+            self.added: list[str] = []
+
+        def add(self, node):
+            self.added.append(node.id)
+            return node.id
+
+        def remove(self, node_id):
+            raise RuntimeError("rollback also broken")
+
+    broken_vec = _BrokenVectorStore()
+    ram = AGIRam(embedding_provider=embedding_provider, vector_store=broken_vec)
+    ram.graph = BrokenGraph()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="simulated upsert failure"):
+        await ram.store(_node("doomed"))
