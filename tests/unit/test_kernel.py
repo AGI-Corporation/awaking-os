@@ -12,6 +12,7 @@ from awaking_os.kernel import AgentRegistry, AKernel, IACBus
 from awaking_os.kernel.kernel import RESULT_TOPIC
 from awaking_os.kernel.task import AgentContext, AgentResult, AgentTask
 from awaking_os.memory.agi_ram import AGIRam
+from awaking_os.memory.node import KnowledgeNode
 from awaking_os.types import AgentType
 
 
@@ -50,7 +51,6 @@ async def test_dispatch_publishes_result_on_bus(kernel: AKernel, bus: IACBus) ->
 
 
 async def test_build_context_uses_memory(kernel: AKernel, agi_ram: AGIRam) -> None:
-    from awaking_os.memory.node import KnowledgeNode
 
     await agi_ram.store(KnowledgeNode(content="ping pong", created_by="test"))
     # Empty payload → kernel falls back to task.id as the memory query.
@@ -61,7 +61,6 @@ async def test_build_context_uses_memory(kernel: AKernel, agi_ram: AGIRam) -> No
 
 
 async def test_build_context_keys_off_payload_content(kernel: AKernel, agi_ram: AGIRam) -> None:
-    from awaking_os.memory.node import KnowledgeNode
 
     # Regression: querying memory by random task UUID never matches anything;
     # the kernel must derive the query from the payload's q/query/topic/goal.
@@ -74,7 +73,6 @@ async def test_build_context_keys_off_payload_content(kernel: AKernel, agi_ram: 
 async def test_build_context_payload_topic_used_for_memory_query(
     kernel: AKernel, agi_ram: AGIRam
 ) -> None:
-    from awaking_os.memory.node import KnowledgeNode
 
     await agi_ram.store(KnowledgeNode(content="cetacean signaling", created_by="test"))
     task = _task(payload={"topic": "cetacean"})

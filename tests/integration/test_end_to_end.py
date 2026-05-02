@@ -134,6 +134,67 @@ def test_cli_cache_db_env_creates_sqlite_cache(tmp_path, monkeypatch) -> None:
     assert rows[0] >= 1
 
 
+def test_cli_rejects_non_object_payload(tmp_path) -> None:
+    """JSON arrays / scalars / null are valid JSON but invalid task payloads."""
+    runner = CliRunner()
+    for bad in ['["a", "b"]', '"just a string"', "42", "null"]:
+        result = runner.invoke(
+            app,
+            ["submit", "--type", "semantic", "--payload", bad, "--fake-llm"],
+            env={"AWAKING_DATA_DIR": str(tmp_path / "awaking")},
+        )
+        assert result.exit_code != 0, (bad, result.stdout)
+        assert "JSON object" in (result.stdout + result.stderr), (
+            bad,
+            result.stdout,
+        )
+
+
+def test_cli_rejects_invalid_cache_ttl(tmp_path) -> None:
+    """AWAKING_LLM_CACHE_TTL that isn't an integer surfaces a Typer error."""
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "submit",
+            "--type",
+            "semantic",
+            "--payload",
+            '{"q": "hi"}',
+            "--fake-llm",
+        ],
+        env={
+            "AWAKING_DATA_DIR": str(tmp_path / "awaking"),
+            "AWAKING_LLM_CACHE_DB": str(tmp_path / "cache.sqlite"),
+            "AWAKING_LLM_CACHE_TTL": "not-a-number",
+        },
+    )
+    assert result.exit_code != 0
+    assert "AWAKING_LLM_CACHE_TTL" in (result.stdout + result.stderr)
+
+
+def test_cli_rejects_zero_or_negative_cache_ttl(tmp_path) -> None:
+    runner = CliRunner()
+    for bad in ("0", "-30"):
+        result = runner.invoke(
+            app,
+            [
+                "submit",
+                "--type",
+                "semantic",
+                "--payload",
+                '{"q": "hi"}',
+                "--fake-llm",
+            ],
+            env={
+                "AWAKING_DATA_DIR": str(tmp_path / "awaking"),
+                "AWAKING_LLM_CACHE_DB": str(tmp_path / "cache.sqlite"),
+                "AWAKING_LLM_CACHE_TTL": bad,
+            },
+        )
+        assert result.exit_code != 0, (bad, result.stdout)
+
+
 def test_cli_executive_runs_subtasks(tmp_path) -> None:
     """Regression: ExecutiveAgent submits sub-tasks via kernel.submit;
     the CLI must run the dispatch loop so they actually execute."""

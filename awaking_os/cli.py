@@ -64,6 +64,8 @@ def submit(
         payload_obj = json.loads(payload)
     except json.JSONDecodeError as e:
         raise typer.BadParameter(f"--payload must be valid JSON: {e}") from e
+    if not isinstance(payload_obj, dict):
+        raise typer.BadParameter("--payload must be a JSON object (mapping)")
 
     asyncio.run(
         _submit_and_run(
@@ -89,7 +91,14 @@ def _build_llm(use_fake_llm: bool) -> LLMProvider:
     cache_db = os.environ.get("AWAKING_LLM_CACHE_DB")
     if cache_db:
         ttl_str = os.environ.get("AWAKING_LLM_CACHE_TTL")
-        ttl = int(ttl_str) if ttl_str else None
+        try:
+            ttl = int(ttl_str) if ttl_str else None
+        except ValueError as e:
+            raise typer.BadParameter(
+                f"AWAKING_LLM_CACHE_TTL must be an integer number of seconds, got {ttl_str!r}"
+            ) from e
+        if ttl is not None and ttl <= 0:
+            raise typer.BadParameter("AWAKING_LLM_CACHE_TTL must be greater than 0")
         return CachingLLMProvider(inner=inner, db_path=Path(cache_db), ttl_seconds=ttl)
     return inner
 

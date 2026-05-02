@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from awaking_os.consciousness.ethical_filter import EthicalFilter
+from awaking_os.consciousness.global_workspace import GlobalWorkspace
+from awaking_os.consciousness.mc_layer import MCLayer
 from awaking_os.consciousness.min_cut_phi import MinCutPhiCalculator
 from awaking_os.consciousness.phi_calculator import PhiCalculator
 
@@ -127,9 +130,6 @@ def test_returns_float(calc: MinCutPhiCalculator) -> None:
 
 def test_can_swap_into_mc_layer() -> None:
     """The calculator must be drop-in compatible with MCLayer."""
-    from awaking_os.consciousness.ethical_filter import EthicalFilter
-    from awaking_os.consciousness.global_workspace import GlobalWorkspace
-    from awaking_os.consciousness.mc_layer import MCLayer
 
     layer = MCLayer(
         phi_calculator=MinCutPhiCalculator(),

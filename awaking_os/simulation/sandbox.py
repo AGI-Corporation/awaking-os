@@ -100,12 +100,14 @@ class Sandbox:
         report_task = asyncio.create_task(consume_reports())
         await asyncio.sleep(0)
 
-        for task in tasks:
-            await kernel.submit(task)
-
+        # Cover the submission phase + run loop in the same try/finally so
+        # the consumers and the kernel are always cleaned up — even if
+        # kernel.submit raises mid-batch.
         start = time.monotonic()
-        kernel.start()
         try:
+            for task in tasks:
+                await kernel.submit(task)
+            kernel.start()
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._drain_timeout_s
             while kernel.pending_count > 0 and loop.time() < deadline:

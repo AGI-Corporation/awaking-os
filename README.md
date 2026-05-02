@@ -183,7 +183,7 @@ hits = await agi_ram.retrieve("integration", k=5)
 |---|---|---|
 | 🐋 **Project Neuron** | Cetacean Bioacoustics | `BioticAgent` (`signal_type=cetacean`) — `awaking_os.io.bio_signals` |
 | 🧬 **Project Genome** | Longevity Genomics | `BioticAgent` (`signal_type=genomic`) — GC-content + base counts |
-| 🪞 **Project Mirror** | Digital Twin Simulation | `ExecutiveAgent` decomposition (sim engine pending) |
+| 🪞 **Project Mirror** | Digital Twin Simulation | `Sandbox` from `awaking_os.simulation` runs isolated experiments + `ExecutiveAgent` decomposition |
 | 🌐 **Project Babel** | Universal Language Model | `SemanticAgent` + `agares` / `paimon` personas |
 
 ---

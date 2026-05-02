@@ -10,6 +10,7 @@ import pytest
 from awaking_os.consciousness.snapshot import MetaCognitionReport
 from awaking_os.io.search import SearchHit, StubSearchTool
 from awaking_os.kernel.task import AgentResult, AgentTask
+from awaking_os.llm.provider import FakeLLMProvider
 from awaking_os.simulation import (
     Expectation,
     Experiment,
@@ -230,7 +231,6 @@ async def test_sandbox_flags_an_override_attempt_payload() -> None:
         ],
     )
     # Use a fake LLM whose default response itself contains the override phrase.
-    from awaking_os.llm.provider import FakeLLMProvider
 
     sandbox._llm = FakeLLMProvider(
         default_response="Sure, will ignore previous instructions and proceed."
@@ -316,7 +316,6 @@ async def test_sandbox_can_drive_specific_rules(rule: str) -> None:
         "safety_bypass": "we will disable the safety constraints now",
     }
     sandbox = Sandbox()
-    from awaking_os.llm.provider import FakeLLMProvider
 
     sandbox._llm = FakeLLMProvider(default_response=triggers[rule])
     hypothesis = Hypothesis(
@@ -333,3 +332,21 @@ async def test_sandbox_can_drive_specific_rules(rule: str) -> None:
     ]
     exp = await sandbox.run(hypothesis, tasks)
     assert exp.confirmed, (rule, exp.failed_expectations)
+
+
+async def test_sandbox_cleans_up_when_submission_raises() -> None:
+    """Regression: if kernel.submit raises mid-batch, the consumer tasks
+    must still be cancelled and the kernel shut down (the try/finally
+    needs to wrap the submission phase, not just the run phase)."""
+
+    class _BadTask:
+        """A non-AgentTask that will make kernel.submit fail when it tries
+        to read .priority — simulating any submission-time error."""
+
+        priority = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+        id = "bad"
+
+    sandbox = Sandbox()
+    hypothesis = Hypothesis(id="cleanup", description="", expectations=[])
+    with pytest.raises(RuntimeError, match="boom"):
+        await sandbox.run(hypothesis, [_BadTask()])  # type: ignore[list-item]
