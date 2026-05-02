@@ -1,6 +1,16 @@
 """Agent implementations + base class."""
 
 from awaking_os.agents.base import Agent, EchoAgent
+from awaking_os.agents.biotic import BioticAgent
+from awaking_os.agents.executive import ExecutiveAgent
+from awaking_os.agents.research import ResearchAgent
 from awaking_os.agents.semantic import SemanticAgent
 
-__all__ = ["Agent", "EchoAgent", "SemanticAgent"]
+__all__ = [
+    "Agent",
+    "BioticAgent",
+    "EchoAgent",
+    "ExecutiveAgent",
+    "ResearchAgent",
+    "SemanticAgent",
+]

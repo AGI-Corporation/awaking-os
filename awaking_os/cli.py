@@ -11,9 +11,9 @@ from uuid import uuid4
 import typer
 
 from awaking_os import __version__
-from awaking_os.agents import EchoAgent, SemanticAgent
-from awaking_os.agents.base import Agent
+from awaking_os.agents import BioticAgent, ExecutiveAgent, ResearchAgent, SemanticAgent
 from awaking_os.config import AwakingSettings
+from awaking_os.io.search import StubSearchTool
 from awaking_os.kernel import AgentRegistry, AKernel, IACBus
 from awaking_os.kernel.task import AgentTask
 from awaking_os.llm import AnthropicProvider, FakeLLMProvider, LLMProvider
@@ -69,11 +69,14 @@ def _build_llm(use_fake_llm: bool) -> LLMProvider:
     return AnthropicProvider()
 
 
-def _build_agent(agent_type: AgentType, agi_ram: AGIRam, llm: LLMProvider) -> Agent:
-    if agent_type == AgentType.SEMANTIC:
-        return SemanticAgent(llm=llm, agi_ram=agi_ram)
-    # Other agent types arrive in PR 4. EchoAgent acts as a placeholder for now.
-    return EchoAgent(agi_ram=agi_ram, agent_type=agent_type)
+def _build_registry(agi_ram: AGIRam, llm: LLMProvider, kernel: AKernel) -> AgentRegistry:
+    """Register one agent for each of the four AgentTypes."""
+    reg = AgentRegistry()
+    reg.register(SemanticAgent(llm=llm, agi_ram=agi_ram))
+    reg.register(ResearchAgent(llm=llm, search=StubSearchTool(), agi_ram=agi_ram))
+    reg.register(BioticAgent(agi_ram=agi_ram))
+    reg.register(ExecutiveAgent(agi_ram=agi_ram, submit=kernel.submit))
+    return reg
 
 
 async def _submit_and_run(
@@ -91,15 +94,17 @@ async def _submit_and_run(
     )
     llm = _build_llm(use_fake_llm)
 
+    # Kernel needs the registry; registry needs kernel.submit (for ExecutiveAgent).
+    # Build the kernel with an empty registry, then attach.
     registry = AgentRegistry()
-    registry.register(_build_agent(agent_type, agi_ram, llm))
-
     kernel = AKernel(
         registry=registry,
         bus=bus,
         agi_ram=agi_ram,
         dispatch_timeout_s=settings.kernel_dispatch_timeout_s,
     )
+    for agent in _build_registry(agi_ram, llm, kernel).all():
+        registry.register(agent)
 
     task = AgentTask(
         id=str(uuid4()),
