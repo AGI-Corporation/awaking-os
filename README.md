@@ -109,25 +109,32 @@ graph TD
 The A-Kernel is the core scheduler. Tasks are submitted, queued by priority, and dispatched to a registered agent. After every dispatch, the kernel publishes the result on the `kernel.result` topic and (when wired) emits a meta-cognition report on `mc.report`.
 
 ```python
+import asyncio
+
 from awaking_os.types import AgentType
 from awaking_os.kernel import AKernel, AgentRegistry, IACBus
 from awaking_os.kernel.task import AgentTask
 
-bus = IACBus()
-registry = AgentRegistry()
-# ... registry.register(some_agent) ...
-kernel = AKernel(registry=registry, bus=bus, agi_ram=agi_ram)
 
-await kernel.submit(
-    AgentTask(
-        id="task-001",
-        priority=80,                    # 0–100, higher = sooner
-        agent_type=AgentType.SEMANTIC,
-        payload={"q": "What is integrated information?"},
-        ethical_constraints=["no_personal_data"],
+async def main() -> None:
+    bus = IACBus()
+    registry = AgentRegistry()
+    # ... registry.register(some_agent) ...
+    kernel = AKernel(registry=registry, bus=bus, agi_ram=agi_ram)
+
+    kernel.start()                       # spawns the dispatch loop
+    await kernel.submit(
+        AgentTask(
+            id="task-001",
+            priority=80,                  # 0–100, higher = sooner
+            agent_type=AgentType.SEMANTIC,
+            payload={"q": "What is integrated information?"},
+            ethical_constraints=["no_personal_data"],
+        )
     )
-)
-kernel.start()                          # spawns the dispatch loop
+
+
+asyncio.run(main())
 ```
 
 Internally, `AKernel.dispatch()` looks up the agent for the task type, builds an `AgentContext` (pulling relevant memory through the bus), executes with a timeout, and returns an `AgentResult`.
@@ -203,7 +210,7 @@ Cleanup + Docs:                       ██████████████
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                300 passing (96% line coverage)
+Tests:                304 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
