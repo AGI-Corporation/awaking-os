@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from awaking_os.agents.base import Agent
+from awaking_os.agents.personas import PERSONAS, Persona
 from awaking_os.kernel.task import AgentContext, AgentResult
 from awaking_os.llm.provider import LLMProvider
 from awaking_os.memory.agi_ram import AGIRam
@@ -49,9 +50,13 @@ class SemanticAgent(Agent):
             if memory_block
             else f"Question:\n{question}"
         )
+        persona = self._resolve_persona(context.task.payload)
+        system_prompt = (
+            f"{persona.system_prompt_fragment}\n\n{self._system}" if persona else self._system
+        )
 
         completion = await self.llm.complete(
-            system=self._system,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
             max_tokens=self._max_tokens,
             cache_system=True,
@@ -64,6 +69,7 @@ class SemanticAgent(Agent):
             metadata={
                 "task_id": context.task.id,
                 "question": question,
+                "persona": persona.name if persona else None,
                 "model": completion.model,
                 "input_tokens": completion.input_tokens,
                 "output_tokens": completion.output_tokens,
@@ -97,6 +103,13 @@ class SemanticAgent(Agent):
             if isinstance(value, str) and value.strip():
                 return value
         return json.dumps(payload, sort_keys=True)
+
+    @staticmethod
+    def _resolve_persona(payload: dict) -> Persona | None:
+        name = payload.get("persona")
+        if not isinstance(name, str):
+            return None
+        return PERSONAS.get(name.lower())
 
     @staticmethod
     def _format_memory(nodes: list[KnowledgeNode]) -> str:

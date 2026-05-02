@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from awaking_os.agents.base import Agent
+from awaking_os.agents.personas import PERSONAS, Persona
 from awaking_os.io.search import SearchHit, SearchTool
 from awaking_os.kernel.task import AgentContext, AgentResult
 from awaking_os.llm.provider import LLMProvider
@@ -47,12 +48,16 @@ class ResearchAgent(Agent):
     async def execute(self, context: AgentContext) -> AgentResult:
         topic = self._extract_topic(context.task.payload)
         k = int(context.task.payload.get("k", 5))
+        persona = self._resolve_persona(context.task.payload)
 
         hits = await self.search.search(topic, k=k)
         user_message = self._format_prompt(topic, hits)
+        system_prompt = (
+            f"{persona.system_prompt_fragment}\n\n{self._system}" if persona else self._system
+        )
 
         completion = await self.llm.complete(
-            system=self._system,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
             max_tokens=self._max_tokens,
             cache_system=True,
@@ -65,6 +70,7 @@ class ResearchAgent(Agent):
             metadata={
                 "task_id": context.task.id,
                 "topic": topic,
+                "persona": persona.name if persona else None,
                 "search_hits": len(hits),
                 "model": completion.model,
                 "input_tokens": completion.input_tokens,
@@ -94,6 +100,13 @@ class ResearchAgent(Agent):
             if isinstance(value, str) and value.strip():
                 return value
         raise ValueError("ResearchAgent payload requires a topic/q/query/question")
+
+    @staticmethod
+    def _resolve_persona(payload: dict) -> Persona | None:
+        name = payload.get("persona")
+        if not isinstance(name, str):
+            return None
+        return PERSONAS.get(name.lower())
 
     @staticmethod
     def _format_prompt(topic: str, hits: list[SearchHit]) -> str:

@@ -6,25 +6,16 @@
 
 ![Awaking OS Banner](https://img.shields.io/badge/Awaking%20OS-Post--AGI%20Metasystem-blueviolet?style=for-the-badge&logo=github)
 ![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=for-the-badge)
-![Phase](https://img.shields.io/badge/Phase-2%20Consciousness%20Layer-orange?style=for-the-badge)
+![Phase](https://img.shields.io/badge/Phase-3%20Integration-orange?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
 ![Agents](https://img.shields.io/badge/Agents-Multi--Agent%20System-red?style=for-the-badge)
-![DeSci](https://img.shields.io/badge/DeSci-Enabled-teal?style=for-the-badge)
+![DeSci](https://img.shields.io/badge/DeSci-Local%20Stub-teal?style=for-the-badge)
 
-**A next-generation, AGI-native operating system designed to orchestrate complex multi-agent workflows, decentralized research protocols, and self-evolving cognitive architectures.**
+**An AGI-native runtime for orchestrating multi-agent workflows, semantic memory, and meta-cognitive monitoring — implemented in Python.**
 
-[📖 Wiki](https://github.com/AGI-Corporation/awaking-os/wiki) • [🗺️ Roadmap](https://github.com/AGI-Corporation/awaking-os/wiki/Project-Roadmap) • [🤖 Agents](agents/) • [🔬 Projects](projects/) • [💡 Insights](insights/)
+[📖 Plan](./PLAN.md) • [🤖 Agents](./awaking_os/agents/) • [🧠 Consciousness Layer](./awaking_os/consciousness/) • [🔬 Examples](./examples/)
 
 </div>
-
----
-
-## 🎬 Introduction Video
-
-> **Watch:** [Awaking OS — System Overview & Vision](https://www.youtube.com/watch?v=dQw4w9WgXcQ)
-> *(Click the image below to watch on YouTube)*
-
-[![Awaking OS Introduction](https://img.shields.io/badge/▶%20Watch%20on%20YouTube-Awaking%20OS%20Overview-red?style=for-the-badge&logo=youtube)](https://www.youtube.com/@AGICorporation)
 
 ---
 
@@ -38,7 +29,7 @@
 │  │              CONSCIOUSNESS LAYER (C-Layer)               │   │
 │  │   ┌──────────────┐  ┌──────────────┐  ┌─────────────┐  │   │
 │  │   │ Global       │  │ Ethical      │  │ Phi (Φ)     │  │   │
-│  │   │ Workspace    │→ │ Alignment    │→ │ Calculator  │  │   │
+│  │   │ Workspace    │→ │ Filter       │→ │ Calculator  │  │   │
 │  │   └──────────────┘  └──────────────┘  └─────────────┘  │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                              ↕                                  │
@@ -63,13 +54,13 @@
 
 ## Core Pillars
 
-| Pillar | Description | Status |
+| Pillar | Module | Status |
 |---|---|---|
-| 🤖 **Agent Kernel** | High-performance scheduler for LLM-based processes, managing context windows, tool-use priority, and IAC | ✅ Phase 1 |
-| 🧠 **Consciousness Layer** | Meta-cognitive framework enabling system-wide self-reflection, goal-alignment monitoring, and adaptive protocol evolution | 🔄 Phase 2 |
-| 🔬 **DeSci Integration** | Native support for IP-NFTs, verifiable research provenance, and decentralized collaboration via modular research protocols | 📋 Phase 3 |
-| 🌐 **Simulation Engine** | A sandbox for running "awakening experiments" where agents test novel hypotheses in isolated environments | 📋 Phase 3 |
-| 🧬 **Biotic Interface** | Direct integration with biological data streams — cetacean bioacoustics, genomic sequencing, and EEG signals | 📋 Phase 3 |
+| 🤖 **Agent Kernel** | `awaking_os.kernel` | ✅ Implemented |
+| 🧠 **Consciousness Layer** | `awaking_os.consciousness` | ✅ Implemented |
+| 🧬 **Memory + DeSci** | `awaking_os.memory` (Chroma + ed25519) | ✅ Implemented (DeSci is a local-signing stub) |
+| 🌐 **Bio I/O + External APIs** | `awaking_os.io` (mock streams + token-bucket gateway) | ✅ Mock streams + real rate-limiter |
+| 🌐 **Simulation Engine** | — | 📋 Future |
 
 ---
 
@@ -80,9 +71,9 @@
 ```mermaid
 graph TD
     INPUT[External Inputs<br/>Bio-signals · APIs · User Queries] --> AKERNEL
-    
+
     subgraph AKERNEL [Agent Kernel]
-        SA[Semantic Agent] 
+        SA[Semantic Agent]
         BA[Biotic Agent]
         EA[Executive Agent]
         RA[Research Agent]
@@ -92,22 +83,22 @@ graph TD
         EA <--> IAC
         RA <--> IAC
     end
-    
+
     AKERNEL --> CLAYER
-    
+
     subgraph CLAYER [Consciousness Layer]
         GW[Global Workspace]
         EF[Ethical Filter]
         PHI[Phi Calculator]
         GW --> EF --> PHI
     end
-    
+
     subgraph MEMORY [AGI-RAM / Knowledge Graph]
         KG[(Knowledge Graph)]
         VE[Vector Store]
         DS[DeSci Attestations]
     end
-    
+
     CLAYER --> MEMORY
     MEMORY --> AKERNEL
     CLAYER --> OUTPUT[Action Manifest &<br/>Research Outputs]
@@ -115,114 +106,105 @@ graph TD
 
 ### 1. The Kernel (A-Kernel)
 
-The A-Kernel is the core scheduler and task orchestrator. It manages all agents using a priority-weighted task queue.
+The A-Kernel is the core scheduler. Tasks are submitted, queued by priority, and dispatched to a registered agent. After every dispatch, the kernel publishes the result on the `kernel.result` topic and (when wired) emits a meta-cognition report on `mc.report`.
 
-```typescript
-interface AgentTask {
-  id: string;
-  priority: number;          // 0-100, higher = more urgent
-  agentType: AgentType;
-  contextWindow: TokenBudget;
-  ethicalConstraints: string[];
-  deadline?: Date;
-}
+```python
+from awaking_os.types import AgentType
+from awaking_os.kernel import AKernel, AgentRegistry, IACBus
+from awaking_os.kernel.task import AgentTask
 
-enum AgentType {
-  SEMANTIC  = 'semantic',
-  BIOTIC    = 'biotic',
-  EXECUTIVE = 'executive',
-  RESEARCH  = 'research'
-}
+bus = IACBus()
+registry = AgentRegistry()
+# ... registry.register(some_agent) ...
+kernel = AKernel(registry=registry, bus=bus, agi_ram=agi_ram)
 
-class AKernel {
-  private taskQueue: PriorityQueue<AgentTask>;
-  private agentRegistry: Map<string, AgentInstance>;
-  private iacBus: IACBus;
-
-  async dispatch(task: AgentTask): Promise<AgentResult> {
-    const agent = this.agentRegistry.get(task.agentType);
-    const context = await this.buildContext(task);
-    return agent.execute(context);
-  }
-
-  async buildContext(task: AgentTask): Promise<AgentContext> {
-    // Pull from AGI-RAM knowledge graph
-    const memory = await this.iacBus.queryMemory(task.id);
-    return { task, memory, ethicalBoundary: task.ethicalConstraints };
-  }
-}
+await kernel.submit(
+    AgentTask(
+        id="task-001",
+        priority=80,                    # 0–100, higher = sooner
+        agent_type=AgentType.SEMANTIC,
+        payload={"q": "What is integrated information?"},
+        ethical_constraints=["no_personal_data"],
+    )
+)
+kernel.start()                          # spawns the dispatch loop
 ```
+
+Internally, `AKernel.dispatch()` looks up the agent for the task type, builds an `AgentContext` (pulling relevant memory through the bus), executes with a timeout, and returns an `AgentResult`.
 
 ### 2. Meta-Cognition (MC-Layer)
 
-The MC-Layer continuously monitors agent outputs and injects corrective signals when behavior deviates from alignment targets.
+The MC-Layer monitors agent outputs after every dispatch. It computes a Φ value (entropy of the spectrum of the integration matrix — a tractable IIT proxy, not full PyPhi), evaluates each output against a rule-based ethical filter, and surfaces salient nodes from the Global Workspace.
 
-```typescript
-interface MetaCognitionReport {
-  phiValue: number;            // IIT consciousness metric
-  alignmentScore: number;      // 0.0 - 1.0
-  deviatingAgents: string[];   // agents flagged for correction
-  recommendedActions: string[];
-}
+```python
+from awaking_os.consciousness import (
+    EthicalFilter, GlobalWorkspace, MCLayer, PhiCalculator,
+)
 
-class MCLayer {
-  async monitor(snapshot: SystemSnapshot): Promise<MetaCognitionReport> {
-    const phi = this.calculatePhi(snapshot.integrationMatrix);
-    const alignment = this.checkAlignment(snapshot.agentOutputs);
-    return { phiValue: phi, alignmentScore: alignment, ...this.diagnose(snapshot) };
-  }
-}
+mc_layer = MCLayer(
+    phi_calculator=PhiCalculator(),
+    ethical_filter=EthicalFilter(),     # 6 default rules; severity → alignment
+    global_workspace=GlobalWorkspace(),
+    alignment_threshold=0.5,
+)
+kernel = AKernel(registry=registry, bus=bus, agi_ram=agi_ram, mc_layer=mc_layer)
 ```
+
+Each `MetaCognitionReport` carries `phi_value`, `alignment_score` (0.0–1.0), `deviating_agents`, `triggered_rules`, `recommended_actions`, and `salient_node_ids`.
 
 ### 3. Knowledge Graph & Memory (AGI-RAM)
 
-AGI-RAM is the semantic long-term memory of the OS — a vector-enhanced knowledge graph storing all agent interactions, research outputs, and world state observations.
+AGI-RAM is the system's long-term semantic memory: a `KnowledgeNode` graph (NetworkX, optionally sqlite-snapshotted) + a vector store (Chroma or in-memory) + optional ed25519 DeSci attestation. `store()` auto-embeds and auto-signs; `retrieve()` runs semantic similarity when embeddings are wired and falls back to keyword overlap otherwise.
 
-```typescript
-interface KnowledgeNode {
-  id: string;
-  type: 'concept' | 'entity' | 'event' | 'research';
-  embedding: Float32Array;     // 1536-dim OpenAI embedding
-  metadata: Record<string, unknown>;
-  attestation?: DeSciAttestation;
-  linkedNodes: string[];
-  createdBy: string;           // agent ID
-  timestamp: Date;
-}
+```python
+from awaking_os.memory import (
+    AGIRam, ChromaVectorStore, DeSciSigner, FakeEmbeddingProvider,
+    KnowledgeNode,
+)
 
-class AGIRam {
-  async store(node: KnowledgeNode): Promise<void> { ... }
-  async retrieve(query: string, k: number = 5): Promise<KnowledgeNode[]> { ... }
-  async linkNodes(source: string, target: string, relation: string): Promise<void> { ... }
-}
+agi_ram = AGIRam(
+    db_path="./data/agi.sqlite",
+    vector_store=ChromaVectorStore(persist_path="./data/chroma"),
+    embedding_provider=FakeEmbeddingProvider(),     # or SentenceTransformer
+    signer=DeSciSigner(),                           # optional ed25519 attestation
+)
+
+node_id = await agi_ram.store(
+    KnowledgeNode(type="research", content="Phi rises with integration.", created_by="seed")
+)
+hits = await agi_ram.retrieve("integration", k=5)
 ```
 
 ---
 
 ## 📊 Active Projects
 
-| Project | Domain | Phase | Lead Agent |
-|---|---|---|---|
-| 🐋 **Project Neuron** | Cetacean Bioacoustics | Phase 1 — Data Collection | BioA-01 |
-| 🧬 **Project Genome** | Longevity Genomics | Phase 1 — Architecture | ResA-01 |
-| 🪞 **Project Mirror** | Digital Twin Simulation | Phase 0 — Concept | ExA-01 |
-| 🌐 **Project Babel** | Universal Language Model | Proposed | SemA-01 |
+| Project | Domain | Backing Agent / Module |
+|---|---|---|
+| 🐋 **Project Neuron** | Cetacean Bioacoustics | `BioticAgent` (`signal_type=cetacean`) — `awaking_os.io.bio_signals` |
+| 🧬 **Project Genome** | Longevity Genomics | `BioticAgent` (`signal_type=genomic`) — GC-content + base counts |
+| 🪞 **Project Mirror** | Digital Twin Simulation | `ExecutiveAgent` decomposition (sim engine pending) |
+| 🌐 **Project Babel** | Universal Language Model | `SemanticAgent` + `agares` / `paimon` personas |
 
 ---
 
 ## 📈 Key Metrics & KPIs
 
 ```
-Phase 1 (Complete)    ████████████████████ 100%
-Phase 2 (Active)      ████████░░░░░░░░░░░░  40%
-Phase 3 (Planned)     ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 4 (Future)      ░░░░░░░░░░░░░░░░░░░░   0%
+Foundation (kernel, bus, memory):    ████████████████████ 100%
+Embeddings + Vector Store + DeSci:   ████████████████████ 100%
+Agents (Semantic, Biotic, Exec, Research): ████████████████████ 100%
+Consciousness Layer (Phi, Ethics, GW, MC): ████████████████████ 100%
+Cleanup + Docs:                       ████████████████████ 100%
+Real Phi (PyPhi-grade):               ░░░░░░░░░░░░░░░░░░░░   0%
+Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
+On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
 
-Target Phi (Φ):        > 0.7 by Phase 4
-Agent Fleet:           50+ specialized agents by 2026
-Knowledge Graph Nodes: 1,000,000+ by Phase 3
-DeSci Publications:    10+ attested papers by 2026
-IAC Throughput:        >10,000 messages/second
+Tests:                ~230 passing
+IAC Bus:              asyncio pub/sub, multi-subscriber
+Knowledge Graph:      NetworkX + sqlite snapshot
+Vector Store:         Chroma (cosine) or in-memory numpy
+LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or Fake
 ```
 
 ---
@@ -230,22 +212,34 @@ IAC Throughput:        >10,000 messages/second
 ## Getting Started
 
 ```bash
-# Clone the repository
+# Clone and install
 git clone https://github.com/AGI-Corporation/awaking-os.git
 cd awaking-os
+pip install -e ".[dev]"
 
-# Install dependencies
-npm install
+# Run the test suite
+pytest
 
-# Run the A-Kernel in development mode
-npm run dev:kernel
+# Submit a task — uses FakeLLMProvider unless ANTHROPIC_API_KEY is set
+awaking-os submit --type semantic --payload '{"q": "What is Phi?"}'
 
-# Run agent simulations
-npm run simulate:agents
+# Force the deterministic fake LLM (no API key needed)
+awaking-os submit --type biotic --payload '{"signal_type": "genomic", "samples": 500}' --fake-llm
 
-# Launch the knowledge graph interface
-npm run kg:explore
+# Decompose a goal into research + semantic sub-tasks
+awaking-os submit --type executive --payload '{"goal": "investigate cetacean signaling"}'
+
+# Specialize an agent with a persona
+awaking-os submit --type semantic --payload '{"q": "How vulnerable is X?", "persona": "vine"}'
+
+# Print the version
+awaking-os version
+
+# Run the end-to-end demo (no API key needed)
+python examples/awaking_demo.py
 ```
+
+For a real LLM, set `ANTHROPIC_API_KEY` (the CLI will pick it up automatically). To use sentence-transformer embeddings instead of the deterministic fake, install the `ml` extra: `pip install -e ".[dev,ml]"`.
 
 ---
 
@@ -253,19 +247,20 @@ npm run kg:explore
 
 | Resource | Link |
 |---|---|
-| 📖 Full Wiki | [Wiki Home](https://github.com/AGI-Corporation/awaking-os/wiki) |
-| 🏗️ Architecture | [Architecture Overview](https://github.com/AGI-Corporation/awaking-os/wiki/Architecture-Overview) |
-| 🤖 Agent Kernel | [Agent Kernel Docs](https://github.com/AGI-Corporation/awaking-os/wiki/Agent-Kernel) |
-| 🧠 Consciousness Layer | [C-Layer Docs](https://github.com/AGI-Corporation/awaking-os/wiki/Consciousness-Layer) |
-| 🔬 DeSci & KG | [DeSci Wiki](https://github.com/AGI-Corporation/awaking-os/wiki/DeSci-&-Knowledge-Graph) |
-| 🗺️ Roadmap | [Project Roadmap](https://github.com/AGI-Corporation/awaking-os/wiki/Project-Roadmap) |
-| 📘 Glossary | [Glossary of Terms](https://github.com/AGI-Corporation/awaking-os/wiki/Glossary) |
+| 📖 Implementation Plan | [PLAN.md](./PLAN.md) |
+| 🤖 Agents | [`awaking_os/agents/`](./awaking_os/agents/) |
+| 🧠 Consciousness Layer | [`awaking_os/consciousness/`](./awaking_os/consciousness/) |
+| 🧬 Memory (AGI-RAM) | [`awaking_os/memory/`](./awaking_os/memory/) |
+| 🔌 LLM Providers | [`awaking_os/llm/`](./awaking_os/llm/) |
+| 📡 I/O (bio-signals, external APIs) | [`awaking_os/io/`](./awaking_os/io/) |
+| 🔬 Examples | [`examples/`](./examples/) |
+| 🧪 Tests | [`tests/`](./tests/) |
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please read the [Wiki](https://github.com/AGI-Corporation/awaking-os/wiki) before opening a pull request. All contributions must pass the ethical constraint checker built into the A-Kernel CI pipeline.
+Contributions are welcome. Please ensure `pytest` passes and `ruff check` + `ruff format --check` are clean before opening a pull request. CI runs on Python 3.11 and 3.12 (see `.github/workflows/ci.yml`).
 
 ---
 
@@ -273,9 +268,7 @@ Contributions are welcome. Please read the [Wiki](https://github.com/AGI-Corpora
 
 Built by [AGI Corporation](https://github.com/AGI-Corporation) · San Francisco, CA
 
-![Made with TypeScript](https://img.shields.io/badge/Made%20with-TypeScript-blue?style=flat-square&logo=typescript)
-![Python](https://img.shields.io/badge/Python-3.11+-yellow?style=flat-square&logo=python)
-![Rust](https://img.shields.io/badge/Rust-Systems%20Layer-orange?style=flat-square&logo=rust)
+![Made with Python](https://img.shields.io/badge/Made%20with-Python%203.11+-yellow?style=flat-square&logo=python)
 ![License MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
 </div>
