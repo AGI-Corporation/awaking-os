@@ -6,6 +6,12 @@ import math
 from collections import Counter
 
 from awaking_os.agents.base import Agent
+from awaking_os.io.bio_features import (
+    CETACEAN_BANDS,
+    EEG_BANDS,
+    sequence_features,
+    time_series_features,
+)
 from awaking_os.io.bio_signals import BioSignalSample, MockBioSignalStream, SignalType
 from awaking_os.kernel.task import AgentContext, AgentResult
 from awaking_os.memory.agi_ram import AGIRam
@@ -73,29 +79,43 @@ class BioticAgent(Agent):
     def _summarize(signal_type: SignalType, samples: list[BioSignalSample]) -> dict:
         if not samples:
             return {"description": f"No {signal_type.value} samples collected."}
+
         if signal_type == SignalType.GENOMIC:
-            counts = Counter(s.value for s in samples)
-            total = len(samples)
+            bases = [str(s.value) for s in samples]
+            counts = Counter(bases)
+            total = len(bases)
             gc = (counts.get("G", 0) + counts.get("C", 0)) / total
+            seq_features = sequence_features(bases)
             return {
                 "description": (
-                    f"Genomic stream: {total} bases, GC content {gc:.3f}, counts {dict(counts)}."
+                    f"Genomic stream: {total} bases, GC content {gc:.3f}, "
+                    f"dimer entropy {seq_features.get('dimer_entropy_bits', 0.0):.3f} bits."
                 ),
                 "gc_content": gc,
                 "counts": dict(counts),
+                **seq_features,
             }
+
+        # Time-series signals (cetacean, EEG): basic stats + spectral features
         values = [float(s.value) for s in samples]
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
         std = math.sqrt(variance)
+        sample_rate = float(samples[0].metadata.get("sample_rate_hz", 1.0))
+        bands = EEG_BANDS if signal_type == SignalType.EEG else CETACEAN_BANDS
+        spectral = time_series_features(values, sample_rate_hz=sample_rate, bands=bands)
+
         return {
             "description": (
                 f"{signal_type.value.capitalize()} stream: {len(values)} samples, "
                 f"mean={mean:.4f}, std={std:.4f}, "
-                f"min={min(values):.4f}, max={max(values):.4f}."
+                f"dominant {spectral.get('dominant_freq_hz', 0.0):.2f} Hz, "
+                f"spectral entropy {spectral.get('spectral_entropy_bits', 0.0):.2f} bits."
             ),
             "mean": mean,
             "std": std,
             "min": min(values),
             "max": max(values),
+            "sample_rate_hz": sample_rate,
+            **spectral,
         }

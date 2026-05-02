@@ -195,17 +195,26 @@ Foundation (kernel, bus, memory):    ██████████████�
 Embeddings + Vector Store + DeSci:   ████████████████████ 100%
 Agents (Semantic, Biotic, Exec, Research): ████████████████████ 100%
 Consciousness Layer (Phi, Ethics, GW, MC): ████████████████████ 100%
+Bio-signal feature extraction:        ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Real Phi (PyPhi-grade):               ░░░░░░░░░░░░░░░░░░░░   0%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                ~230 passing
+Tests:                237 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
-Knowledge Graph:      NetworkX + sqlite snapshot
+Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
+Bio-signal features:  FFT (dominant freq, spectral entropy, band powers)
+                      + dinucleotide k-mer counts + entropy
 LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or Fake
 ```
+
+> **Wiki note (2026-05-02):** the GitHub wiki at
+> [`/wiki`](https://github.com/AGI-Corporation/awaking-os/wiki) still references
+> the deleted esoteric modules (Lemegeton Engine, Planetary Pentacles,
+> Somatic Recombination). The code in this repo is authoritative; the wiki
+> needs to be cleaned up by a maintainer with wiki-repo write access.
 
 ---
 
