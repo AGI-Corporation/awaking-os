@@ -1,7 +1,9 @@
 """AGI-RAM facade — store, retrieve, link knowledge nodes.
 
-PR 1: retrieve uses keyword matching against the graph. Embeddings + Chroma
-arrive in PR 2.
+When wired with an :class:`EmbeddingProvider` and a :class:`VectorStore`,
+``retrieve`` runs semantic similarity search. Without those, it falls
+back to keyword-overlap ranking (used by tests that don't need real
+embeddings).
 """
 
 from __future__ import annotations
@@ -9,8 +11,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from awaking_os.memory.embeddings import EmbeddingProvider
 from awaking_os.memory.knowledge_graph import NetworkXKnowledgeGraph
 from awaking_os.memory.node import KnowledgeNode
+from awaking_os.memory.vector_store import VectorStore
 
 _TOKEN_RE = re.compile(r"\w+")
 
@@ -20,11 +24,35 @@ def _tokens(text: str) -> set[str]:
 
 
 class AGIRam:
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        vector_store: VectorStore | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        signer: object | None = None,  # DeSciSigner; kept loose to avoid import cycle
+    ) -> None:
         self.graph = NetworkXKnowledgeGraph(db_path=db_path)
+        self.vector_store = vector_store
+        self.embedding_provider = embedding_provider
+        self.signer = signer
+
+    @property
+    def semantic_enabled(self) -> bool:
+        return self.vector_store is not None and self.embedding_provider is not None
 
     async def store(self, node: KnowledgeNode) -> str:
-        return self.graph.add(node)
+        if node.embedding is None and self.embedding_provider is not None:
+            node.embedding = await self.embedding_provider.embed(node.content)
+        if self.signer is not None and node.attestation is None:
+            node.attestation = self.signer.sign(node)  # type: ignore[attr-defined]
+        node_id = self.graph.add(node)
+        if self.vector_store is not None and node.embedding is not None:
+            await self.vector_store.upsert(
+                node_id=node_id,
+                embedding=node.embedding,
+                metadata={"type": node.type, "created_by": node.created_by},
+            )
+        return node_id
 
     async def get(self, node_id: str) -> KnowledgeNode | None:
         return self.graph.get(node_id)
@@ -33,7 +61,24 @@ class AGIRam:
         self.graph.link(source, target, relation)
 
     async def retrieve(self, query: str, k: int = 5) -> list[KnowledgeNode]:
-        """Keyword-overlap ranking. Replaced by semantic search in PR 2."""
+        if self.semantic_enabled:
+            return await self._semantic_retrieve(query, k)
+        return await self._keyword_retrieve(query, k)
+
+    async def _semantic_retrieve(self, query: str, k: int) -> list[KnowledgeNode]:
+        assert self.embedding_provider is not None and self.vector_store is not None
+        if not query.strip():
+            return []
+        q_emb = await self.embedding_provider.embed(query)
+        hits = await self.vector_store.query(q_emb, k=k)
+        out: list[KnowledgeNode] = []
+        for hit in hits:
+            node = self.graph.get(hit.node_id)
+            if node is not None:
+                out.append(node)
+        return out
+
+    async def _keyword_retrieve(self, query: str, k: int) -> list[KnowledgeNode]:
         q_tokens = _tokens(query)
         if not q_tokens:
             return []
