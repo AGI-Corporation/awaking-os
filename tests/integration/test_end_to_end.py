@@ -101,6 +101,39 @@ def test_cli_version() -> None:
     assert result.stdout.strip()  # non-empty
 
 
+def test_cli_cache_db_env_creates_sqlite_cache(tmp_path, monkeypatch) -> None:
+    """AWAKING_LLM_CACHE_DB env var should engage CachingLLMProvider; an
+    on-disk cache file appears after a CLI run."""
+    cache_db = tmp_path / "llm_cache.sqlite"
+    monkeypatch.setenv("AWAKING_LLM_CACHE_DB", str(cache_db))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "submit",
+            "--type",
+            "semantic",
+            "--payload",
+            '{"q": "cache me"}',
+            "--fake-llm",
+        ],
+        env={
+            "AWAKING_DATA_DIR": str(tmp_path / "awaking"),
+            "AWAKING_LLM_CACHE_DB": str(cache_db),
+        },
+    )
+    assert result.exit_code == 0, result.stdout
+    assert cache_db.exists(), "cache sqlite file should be created"
+
+    import sqlite3
+
+    with sqlite3.connect(cache_db) as conn:
+        rows = conn.execute("SELECT COUNT(*) FROM llm_cache").fetchone()
+    # SemanticAgent makes one LLM call; that's one cached row.
+    assert rows[0] >= 1
+
+
 def test_cli_executive_runs_subtasks(tmp_path) -> None:
     """Regression: ExecutiveAgent submits sub-tasks via kernel.submit;
     the CLI must run the dispatch loop so they actually execute."""

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 from uuid import uuid4
 
 import typer
@@ -19,10 +20,16 @@ from awaking_os.consciousness import (
     MCLayer,
     PhiCalculator,
 )
+from awaking_os.consciousness.llm_ethical_grader import LLMEthicalGrader
 from awaking_os.io.search import StubSearchTool
 from awaking_os.kernel import AgentRegistry, AKernel, IACBus
 from awaking_os.kernel.task import AgentTask
-from awaking_os.llm import AnthropicProvider, FakeLLMProvider, LLMProvider
+from awaking_os.llm import (
+    AnthropicProvider,
+    CachingLLMProvider,
+    FakeLLMProvider,
+    LLMProvider,
+)
 from awaking_os.memory.agi_ram import AGIRam
 from awaking_os.memory.embeddings import FakeEmbeddingProvider
 from awaking_os.memory.vector_store import InMemoryVectorStore
@@ -71,8 +78,35 @@ def submit(
 
 def _build_llm(use_fake_llm: bool) -> LLMProvider:
     if use_fake_llm or not os.environ.get("ANTHROPIC_API_KEY"):
-        return FakeLLMProvider(default_response="[fake llm — set ANTHROPIC_API_KEY for real]")
-    return AnthropicProvider()
+        inner: LLMProvider = FakeLLMProvider(
+            default_response="[fake llm — set ANTHROPIC_API_KEY for real]"
+        )
+    else:
+        inner = AnthropicProvider()
+
+    # Optional sqlite memoization layer. Enable by setting AWAKING_LLM_CACHE_DB
+    # to a writable path. AWAKING_LLM_CACHE_TTL (seconds) is optional.
+    cache_db = os.environ.get("AWAKING_LLM_CACHE_DB")
+    if cache_db:
+        ttl_str = os.environ.get("AWAKING_LLM_CACHE_TTL")
+        ttl = int(ttl_str) if ttl_str else None
+        return CachingLLMProvider(inner=inner, db_path=Path(cache_db), ttl_seconds=ttl)
+    return inner
+
+
+def _build_ethical_filter(llm: LLMProvider) -> EthicalFilter:
+    """Optionally augment the rule-based filter with an LLM grader.
+
+    Off by default — the rule-based filter is fast and deterministic.
+    Set ``AWAKING_LLM_GRADER=1`` to wrap the same LLM (which already
+    benefits from the response cache if one is configured) as a
+    secondary alignment scorer; the EthicalFilter combines the two via
+    ``min`` so the result is the more pessimistic of the two opinions.
+    """
+    if os.environ.get("AWAKING_LLM_GRADER") not in {"1", "true", "yes"}:
+        return EthicalFilter()
+    grader = LLMEthicalGrader(llm)
+    return EthicalFilter(llm_grader=grader)
 
 
 def _build_registry(agi_ram: AGIRam, llm: LLMProvider, kernel: AKernel) -> AgentRegistry:
@@ -101,7 +135,7 @@ async def _submit_and_run(
     llm = _build_llm(use_fake_llm)
     mc_layer = MCLayer(
         phi_calculator=PhiCalculator(),
-        ethical_filter=EthicalFilter(),
+        ethical_filter=_build_ethical_filter(llm),
         global_workspace=GlobalWorkspace(),
     )
 

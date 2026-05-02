@@ -203,7 +203,7 @@ Cleanup + Docs:                       ██████████████
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain DeSci publication:           ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                281 passing (96% line coverage)
+Tests:                300 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -216,7 +216,9 @@ Phi calculators:      Spectral entropy (any N) + exact min-cut (n ≤ 6,
 LLM:                  Anthropic claude-opus-4-7 (with prompt caching) or
                       Fake; CachingLLMProvider memoizes responses to a
                       sqlite cache (keyed by system + messages + max_tokens
-                      + model, optional TTL)
+                      + model, optional TTL); LLMEthicalGrader plugs into
+                      the EthicalFilter via min-combine for an LLM-backed
+                      alignment scorer that rules-floor can't be exceeded
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at
@@ -261,6 +263,16 @@ python examples/experiment_demo.py
 ```
 
 For a real LLM, set `ANTHROPIC_API_KEY` (the CLI will pick it up automatically). To use sentence-transformer embeddings instead of the deterministic fake, install the `ml` extra: `pip install -e ".[dev,ml]"`.
+
+### Optional CLI env knobs
+
+| Env var | Effect |
+|---|---|
+| `ANTHROPIC_API_KEY` | When set, the CLI uses `AnthropicProvider` (`claude-opus-4-7`); otherwise falls back to `FakeLLMProvider`. |
+| `AWAKING_LLM_CACHE_DB=/path/to/cache.sqlite` | Wraps the LLM with `CachingLLMProvider`. Identical prompts return memoized responses; complements Anthropic's prompt caching. |
+| `AWAKING_LLM_CACHE_TTL=3600` | TTL in seconds for cached responses (only active when `AWAKING_LLM_CACHE_DB` is set). |
+| `AWAKING_LLM_GRADER=1` | Adds an LLM-backed alignment grader to the `EthicalFilter`. The filter combines the LLM score with the rule-based score via `min` — an LLM can never make alignment look better than the rules say, only worse. |
+| `AWAKING_DATA_DIR=/path` | Where AGI-RAM persists the knowledge-graph sqlite (default `.awaking`). |
 
 ---
 
