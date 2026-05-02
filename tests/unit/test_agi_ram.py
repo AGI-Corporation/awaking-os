@@ -154,8 +154,16 @@ async def test_existing_attestation_is_preserved(
 # --- atomic store rollback (PR #1 review follow-up) ---------------------------
 
 
-class _BrokenVectorStore:
-    """Minimal VectorStore stand-in whose upsert always raises."""
+from awaking_os.memory.vector_store import VectorStore  # noqa: E402
+
+
+class _BrokenVectorStore(VectorStore):
+    """Minimal VectorStore stand-in whose upsert always raises.
+
+    Subclasses the ABC so future additions to ``VectorStore`` will surface as
+    abstract-method errors here, rather than letting the test silently pass on
+    an incomplete interface.
+    """
 
     def __init__(self) -> None:
         self.upsert_calls = 0

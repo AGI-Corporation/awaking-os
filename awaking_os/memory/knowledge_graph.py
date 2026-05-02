@@ -159,7 +159,7 @@ class NetworkXKnowledgeGraph:
         return out
 
     def all_nodes(self) -> list[KnowledgeNode]:
-        return [self.get(n) for n in self._g.nodes if self.get(n) is not None]  # type: ignore[misc]
+        return [node for n in self._g.nodes if (node := self.get(n)) is not None]
 
     def __len__(self) -> int:
         return self._g.number_of_nodes()

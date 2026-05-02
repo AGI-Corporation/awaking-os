@@ -110,10 +110,12 @@ def test_remove_drops_incident_edges() -> None:
     g.link(b.id, c.id, "next")
 
     g.remove(b.id)
-    # a no longer has any successors, c is still there but has no predecessors
-    assert g.neighbors(a.id, depth=1) == []
-    assert g.neighbors(c.id, depth=1) == []
+    # b is gone; a and c remain but the edge between them is broken.
+    assert b.id not in g
     assert a.id in g and c.id in g
+    assert g.neighbors(a.id, depth=1) == []
+    # Two-hop traversal from a no longer reaches c (the path went through b).
+    assert g.neighbors(a.id, depth=2) == []
 
 
 def test_remove_persistence_cascade(tmp_path: Path) -> None:
