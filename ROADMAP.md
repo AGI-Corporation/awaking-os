@@ -6,7 +6,7 @@ ROADMAP is what comes after.
 
 Status legend: ✅ shipped · 🚧 in-flight · 📋 planned · 💤 explicitly out of scope
 
-Last updated: 2026-05-03 (after commit `2d7eab5`).
+Last updated: 2026-05-03 (after commit `e617528`).
 
 ---
 
@@ -94,11 +94,20 @@ These items strengthen the foundation. Order roughly reflects dependency.
 - Shutdown cancels in-flight retry backoffs so the loop exits
   promptly without leaking asyncio tasks.
 
-### C.5 — Worker pool / parallel dispatch
-- Today: single dispatch loop, one task at a time
-- Add `concurrency: int` to `AKernel` (defaults to 1 for backwards compat)
-- Tasks run concurrently; the snapshot's `_task_meta` ordering becomes timestamp-keyed instead of dispatch-order
-- Tests: deterministic outcome with concurrency=1; performance test with concurrency=N
+### C.5 — Worker pool / parallel dispatch ✅
+- `AKernel` takes `concurrency: int = 1`. With concurrency=1 the
+  behavior is byte-identical to the prior single-loop dispatcher
+  (existing tests pass unchanged); concurrency≥2 spawns N
+  `_worker_loop` coroutines that all pull from the same task queue.
+- The shared queue's existing semantics carry the load: priority is
+  honored across workers; FIFO tiebreak still works; the
+  `PersistentTaskQueue`'s conditional UPDATE prevents double-claim.
+- `_task_meta` carries a completion timestamp; `_build_snapshot`
+  sorts by that timestamp so the consecutive-edge heuristic reflects
+  actual completion order rather than racy deque-insertion order.
+- `shutdown()` flips `_stopping`; workers exit at the top of their
+  next iteration. In-flight dispatches complete naturally so an
+  agent's mutation isn't torn mid-store.
 
 ---
 

@@ -210,11 +210,12 @@ On-chain DeSci publication (local JSONL): ████████████�
 Persistent task queue + recovery:     ████████████████████ 100%
 Structured per-task tracing:          ████████████████████ 100%
 Per-task retry policy + backoff:      ████████████████████ 100%
+Worker pool / parallel dispatch:      ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                382 passing (96% line coverage)
+Tests:                389 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -254,6 +255,13 @@ Retry policy:         Optional RetryPolicy on AgentTask drives
                       Kernel re-pends failed tasks via async backoff;
                       task.attempts increments per retry; idempotency is
                       the agent's contract.
+Worker pool:          AKernel(concurrency=N) spawns N _worker_loop
+                      coroutines that share the task queue. Priority +
+                      FIFO honored across workers; PersistentTaskQueue's
+                      conditional UPDATE prevents double-claim. Snapshot
+                      consecutive-edge heuristic now keys off completion
+                      timestamps so concurrent dispatches don't garble
+                      the integration matrix.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at

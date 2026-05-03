@@ -52,12 +52,16 @@ class AKernel:
         snapshot_window: int = 10,
         task_queue: TaskQueue | None = None,
         trace_sink: TraceSink | None = None,
+        concurrency: int = 1,
     ) -> None:
+        if concurrency < 1:
+            raise ValueError("concurrency must be at least 1")
         self.registry = registry
         self.bus = bus
         self.agi_ram = agi_ram
         self.dispatch_timeout_s = dispatch_timeout_s
         self.mc_layer = mc_layer
+        self.concurrency = concurrency
         self.task_queue: TaskQueue = task_queue if task_queue is not None else InMemoryTaskQueue()
         self.trace_sink: TraceSink = trace_sink if trace_sink is not None else NullTraceSink()
         self._stopping = asyncio.Event()
@@ -66,9 +70,14 @@ class AKernel:
         # promptly and asyncio doesn't warn about un-awaited coroutines.
         self._retry_tasks: set[asyncio.Task[None]] = set()
         self._recent_results: deque[AgentResult] = deque(maxlen=snapshot_window)
-        # task_id → (producing agent_id, parent_task_id from payload). Sized to
-        # the snapshot window so it doesn't grow unbounded.
-        self._task_meta: deque[tuple[str, str, str | None]] = deque(maxlen=snapshot_window * 4)
+        # task_id → (agent_id, parent_task_id, completion_ts_monotonic).
+        # The timestamp is what _build_snapshot uses to order tasks for
+        # the consecutive-edge heuristic — with concurrency > 1, the
+        # deque insertion order can race when workers finish at the
+        # same time, but completion timestamps preserve causality.
+        self._task_meta: deque[tuple[str, str, str | None, float]] = deque(
+            maxlen=snapshot_window * 4
+        )
         self.bus.attach_memory(agi_ram)
 
     async def submit(self, task: AgentTask) -> str:
@@ -125,13 +134,13 @@ class AKernel:
                         )
                 if result.elapsed_ms == 0:
                     result.elapsed_ms = int((time.monotonic() - start) * 1000)
-                # Track task → (agent, parent) for the snapshot's integration
-                # matrix. Done before the result publish so concurrent
-                # subscribers see consistent state.
+                # Track task → (agent, parent, completion_ts) for the
+                # snapshot's integration matrix. Done before the result
+                # publish so concurrent subscribers see consistent state.
                 parent_id = task.payload.get("parent_task_id")
                 if not isinstance(parent_id, str):
                     parent_id = None
-                self._task_meta.append((task.id, result.agent_id, parent_id))
+                self._task_meta.append((task.id, result.agent_id, parent_id, time.monotonic()))
                 async with tracer.span("bus.publish", topic=RESULT_TOPIC):
                     await self.bus.publish(RESULT_TOPIC, result)
                 self._recent_results.append(result)
@@ -171,11 +180,17 @@ class AKernel:
         if n >= 2:
             index = {aid: i for i, aid in enumerate(agent_ids)}
 
+            # Order task meta by completion timestamp. With concurrency=1
+            # this matches the deque insertion order; with concurrency>1
+            # it tracks actual completion order, which is what the
+            # consecutive-edge signal claims to capture.
+            ordered_meta = sorted(self._task_meta, key=lambda m: m[3])
+
             # Strong signal: parent_task_id chains. If task B was submitted
             # as a sub-task of task A, the agent that handled A causally
             # influenced the agent that handled B.
-            task_to_agent = {task_id: aid for task_id, aid, _ in self._task_meta}
-            for _task_id, child_agent, parent_id in self._task_meta:
+            task_to_agent = {task_id: aid for task_id, aid, _, _ in ordered_meta}
+            for _task_id, child_agent, parent_id, _ts in ordered_meta:
                 if parent_id is None or parent_id not in task_to_agent:
                     continue
                 parent_agent = task_to_agent[parent_id]
@@ -185,10 +200,14 @@ class AKernel:
                 if i != j:
                     matrix[i][j] += self._PARENT_EDGE_WEIGHT
 
-            # Weaker signal: consecutive dispatch order. Useful when no
+            # Weaker signal: completion-time adjacency. Useful when no
             # parent chain exists (e.g., independent user-submitted tasks).
-            for prev, curr in zip(results[:-1], results[1:], strict=True):
-                i, j = index[prev.agent_id], index[curr.agent_id]
+            for prev_meta, curr_meta in zip(ordered_meta[:-1], ordered_meta[1:], strict=True):
+                prev_agent = prev_meta[1]
+                curr_agent = curr_meta[1]
+                if prev_agent not in index or curr_agent not in index:
+                    continue
+                i, j = index[prev_agent], index[curr_agent]
                 if i != j:
                     matrix[i][j] += self._CONSECUTIVE_EDGE_WEIGHT
 
@@ -200,47 +219,65 @@ class AKernel:
         )
 
     async def run(self) -> None:
-        """Main dispatch loop. Stops when ``shutdown()`` is called."""
+        """Main dispatch loop. Spawns ``concurrency`` worker coroutines
+        that all pull from the same task queue. Returns when every
+        worker has observed ``_stopping`` and exited."""
+        workers = [
+            asyncio.create_task(self._worker_loop(), name=f"awaking-worker-{i}")
+            for i in range(self.concurrency)
+        ]
+        try:
+            await asyncio.gather(*workers)
+        except asyncio.CancelledError:
+            for w in workers:
+                w.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            raise
+
+    async def _worker_loop(self) -> None:
         while not self._stopping.is_set():
             task = await self.task_queue.get(timeout=0.1)
             if task is None:
                 continue
-            success = True
-            error: str | None = None
-            elapsed_ms = 0
-            start = time.monotonic()
-            try:
-                result = await self.dispatch(task)
-                elapsed_ms = result.elapsed_ms
-                # An agent can mark itself as failed via output["error"];
-                # mirror that into the queue's audit row.
-                if isinstance(result.output, dict) and "error" in result.output:
-                    success = False
-                    error = str(result.output["error"])
-            except Exception as e:
+            await self._process_one(task)
+
+    async def _process_one(self, task: AgentTask) -> None:
+        success = True
+        error: str | None = None
+        elapsed_ms = 0
+        start = time.monotonic()
+        try:
+            result = await self.dispatch(task)
+            elapsed_ms = result.elapsed_ms
+            # An agent can mark itself as failed via output["error"];
+            # mirror that into the queue's audit row.
+            if isinstance(result.output, dict) and "error" in result.output:
                 success = False
-                error = repr(e)
-                elapsed_ms = int((time.monotonic() - start) * 1000)
-                logger.exception("Dispatch failed for task %s", task.id)
-            finally:
-                # Decide retry vs final-audit. If the task has a retry
-                # policy with budget left and a retryable error, the
-                # kernel re-pends it after a backoff (without recording
-                # a final done() yet). Otherwise the queue audit closes
-                # this attempt.
-                attempts_so_far = task.attempts + 1
-                if (
-                    not success
-                    and task.retry_policy is not None
-                    and task.retry_policy.should_retry(attempts_so_far, error)
-                ):
-                    delay_s = task.retry_policy.backoff_s(attempts_so_far)
-                    retried = task.model_copy(update={"attempts": attempts_so_far})
-                    self._track_retry(retried, delay_s)
-                else:
-                    await self.task_queue.done(
-                        task.id, success=success, elapsed_ms=elapsed_ms, error=error
-                    )
+                error = str(result.output["error"])
+        except Exception as e:
+            success = False
+            error = repr(e)
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            logger.exception("Dispatch failed for task %s", task.id)
+        finally:
+            # Decide retry vs final-audit. If the task has a retry
+            # policy with budget left and a retryable error, the
+            # kernel re-pends it after a backoff (without recording
+            # a final done() yet). Otherwise the queue audit closes
+            # this attempt.
+            attempts_so_far = task.attempts + 1
+            if (
+                not success
+                and task.retry_policy is not None
+                and task.retry_policy.should_retry(attempts_so_far, error)
+            ):
+                delay_s = task.retry_policy.backoff_s(attempts_so_far)
+                retried = task.model_copy(update={"attempts": attempts_so_far})
+                self._track_retry(retried, delay_s)
+            else:
+                await self.task_queue.done(
+                    task.id, success=success, elapsed_ms=elapsed_ms, error=error
+                )
 
     def _track_retry(self, task: AgentTask, delay_s: float) -> None:
         """Schedule a retry without blocking the dispatch loop.
