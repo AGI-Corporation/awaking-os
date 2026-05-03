@@ -6,7 +6,7 @@ ROADMAP is what comes after.
 
 Status legend: ✅ shipped · 🚧 in-flight · 📋 planned · 💤 explicitly out of scope
 
-Last updated: 2026-05-03 (after commit `e617528`).
+Last updated: 2026-05-03 (after commit `cfe5454`).
 
 ---
 
@@ -113,11 +113,26 @@ These items strengthen the foundation. Order roughly reflects dependency.
 
 ## Phase D — Capability Expansion 📋
 
-### D.1 — Multi-step Semantic agent
-- Today: `SemanticAgent` does one LLM call → one node
-- Add a `ReasoningSemanticAgent` that can submit follow-up tasks based on its own LLM output
-- Termination: max-depth on the parent_task_id chain (already tracked)
-- Use the existing parent_task_id integration — sub-tasks inherit context
+### D.1 — Multi-step Semantic agent ✅
+- `agents.reasoning.ReasoningSemanticAgent` builds on `SemanticAgent`
+  but its LLM is contracted to return one of:
+  - `ANSWER: <text>` — final answer, no fan-out
+  - `FOLLOWUP: <q1> | <q2> | <q3>` — sub-questions to investigate
+- On `FOLLOWUP`, the agent submits up to `max_followups` child tasks
+  back through `kernel.submit` with `parent_task_id` and incremented
+  `depth`. Sub-tasks are fire-and-forget — the parent's result lists
+  the spawned ids and children's answers land on `kernel.result`
+  independently.
+- Termination is depth-bounded by `max_depth`. When a follow-up would
+  cross the cap, the agent emits `output["followup_truncated"] = True`
+  instead of fanning out so callers see the boundary explicitly.
+- Malformed LLM output (neither ANSWER nor FOLLOWUP) is reported as
+  `output["error"] = "unparseable LLM response"` so the kernel's
+  RetryPolicy (Phase C.4) can retry; the bad output is still
+  persisted as a `KnowledgeNode` for audit.
+- Composes cleanly with C.3 traces (each step has its own
+  `dispatch → agent.execute` span tree) and C.5 concurrency (sibling
+  follow-ups run in parallel under the worker pool).
 
 ### D.2 — Real web search
 - Today: `StubSearchTool` only
