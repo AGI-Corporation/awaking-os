@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awaking-os"
+version = "0.1.0"
+description = "Post-AGI Metasystem: A-Kernel + Consciousness Layer + AGI-RAM"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "AGI Corporation" }]
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "networkx>=3.0",
+    "typer>=0.9",
+    "numpy>=1.24",
+    "chromadb>=0.4",
+    "cryptography>=41.0",
+    "anthropic>=0.50",
+    "httpx>=0.25",
+]
+
+[project.optional-dependencies]
+ml = ["sentence-transformers>=2.2"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+awaking-os = "awaking_os.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["awaking_os*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"awaking_os/cli.py" = ["B008"]  # typer.Option in defaults is idiomatic
