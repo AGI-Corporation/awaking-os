@@ -215,13 +215,14 @@ class PersistentTaskQueue(TaskQueue):
     async def get(self, timeout: float = 0.1) -> AgentTask | None:
         # Poll up to ``timeout``, in 10 ms increments. A future Redis
         # backend would use a blocking pop; sqlite needs polling.
-        deadline = asyncio.get_event_loop().time() + timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         while True:
             async with self._lock:
                 task = await asyncio.to_thread(self._claim_sync)
             if task is not None:
                 return task
-            if asyncio.get_event_loop().time() >= deadline:
+            if loop.time() >= deadline:
                 return None
             await asyncio.sleep(0.01)
 

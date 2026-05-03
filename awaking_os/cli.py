@@ -33,6 +33,7 @@ from awaking_os.llm import (
 from awaking_os.memory.agi_ram import AGIRam
 from awaking_os.memory.embeddings import FakeEmbeddingProvider
 from awaking_os.memory.vector_store import InMemoryVectorStore
+from awaking_os.observability.trace import JSONLTraceSink, NullTraceSink, TraceSink
 from awaking_os.types import AgentType
 
 app = typer.Typer(help="Awaking OS — Post-AGI Metasystem CLI")
@@ -103,6 +104,19 @@ def _build_llm(use_fake_llm: bool) -> LLMProvider:
     return inner
 
 
+def _build_trace_sink(settings: AwakingSettings) -> TraceSink:
+    """Optionally persist task traces to a JSONL file.
+
+    Off by default. Set ``AWAKING_TRACE_DIR`` to a directory; traces
+    are appended to ``<dir>/traces.jsonl``. Disable explicitly by
+    leaving the env var unset.
+    """
+    trace_dir = os.environ.get("AWAKING_TRACE_DIR")
+    if not trace_dir:
+        return NullTraceSink()
+    return JSONLTraceSink(Path(trace_dir) / "traces.jsonl")
+
+
 def _build_ethical_filter(llm: LLMProvider) -> EthicalFilter:
     """Optionally augment the rule-based filter with an LLM grader.
 
@@ -157,6 +171,7 @@ async def _submit_and_run(
         agi_ram=agi_ram,
         dispatch_timeout_s=settings.kernel_dispatch_timeout_s,
         mc_layer=mc_layer,
+        trace_sink=_build_trace_sink(settings),
     )
     for agent in _build_registry(agi_ram, llm, kernel).all():
         registry.register(agent)

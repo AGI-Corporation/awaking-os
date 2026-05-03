@@ -13,6 +13,12 @@ from awaking_os.kernel.bus import IACBus
 from awaking_os.kernel.queue import InMemoryTaskQueue, TaskQueue
 from awaking_os.kernel.registry import AgentRegistry
 from awaking_os.kernel.task import AgentContext, AgentResult, AgentTask
+from awaking_os.observability.trace import (
+    TRACE_TOPIC,
+    NullTraceSink,
+    Tracer,
+    TraceSink,
+)
 
 if TYPE_CHECKING:
     from awaking_os.consciousness.mc_layer import MCLayer
@@ -22,6 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RESULT_TOPIC = "kernel.result"
+__all__ = ["AKernel", "RESULT_TOPIC", "TRACE_TOPIC"]
 
 
 class AKernel:
@@ -44,6 +51,7 @@ class AKernel:
         mc_layer: MCLayer | None = None,
         snapshot_window: int = 10,
         task_queue: TaskQueue | None = None,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         self.registry = registry
         self.bus = bus
@@ -51,6 +59,7 @@ class AKernel:
         self.dispatch_timeout_s = dispatch_timeout_s
         self.mc_layer = mc_layer
         self.task_queue: TaskQueue = task_queue if task_queue is not None else InMemoryTaskQueue()
+        self.trace_sink: TraceSink = trace_sink if trace_sink is not None else NullTraceSink()
         self._stopping = asyncio.Event()
         self._run_task: asyncio.Task[None] | None = None
         self._recent_results: deque[AgentResult] = deque(maxlen=snapshot_window)
@@ -84,32 +93,52 @@ class AKernel:
         return task.id
 
     async def dispatch(self, task: AgentTask) -> AgentResult:
-        agent = self.registry.get(task.agent_type)
-        context = await self.build_context(task)
-        start = time.monotonic()
+        tracer = Tracer(task_id=task.id, sink=self.trace_sink)
         try:
-            result = await asyncio.wait_for(agent.execute(context), timeout=self.dispatch_timeout_s)
-        except TimeoutError:
-            logger.warning("Task %s timed out after %.1fs", task.id, self.dispatch_timeout_s)
-            result = AgentResult(
-                task_id=task.id,
-                agent_id=getattr(agent, "agent_id", "unknown"),
-                output={"error": "timeout"},
-                elapsed_ms=int((time.monotonic() - start) * 1000),
-            )
-        if result.elapsed_ms == 0:
-            result.elapsed_ms = int((time.monotonic() - start) * 1000)
-        # Track task → (agent, parent) so the snapshot can build a richer
-        # integration matrix from real parent_task_id chains.
-        parent_id = task.payload.get("parent_task_id")
-        if not isinstance(parent_id, str):
-            parent_id = None
-        self._task_meta.append((task.id, result.agent_id, parent_id))
-        await self.bus.publish(RESULT_TOPIC, result)
-        self._recent_results.append(result)
-        if self.mc_layer is not None:
-            await self._emit_mc_report()
-        return result
+            agent = self.registry.get(task.agent_type)
+            agent_id = getattr(agent, "agent_id", "unknown")
+            async with tracer.span("dispatch", agent_type=task.agent_type.value, agent_id=agent_id):
+                async with tracer.span("build_context"):
+                    context = await self.build_context(task)
+                start = time.monotonic()
+                async with tracer.span("agent.execute", agent_id=agent_id) as exec_span:
+                    try:
+                        result = await asyncio.wait_for(
+                            agent.execute(context), timeout=self.dispatch_timeout_s
+                        )
+                    except TimeoutError:
+                        logger.warning(
+                            "Task %s timed out after %.1fs", task.id, self.dispatch_timeout_s
+                        )
+                        # Mark the span as a timeout so the trace surfaces
+                        # it without us having to let the exception out
+                        # (callers expect a result, not a raise).
+                        exec_span.error = "timeout"
+                        result = AgentResult(
+                            task_id=task.id,
+                            agent_id=agent_id,
+                            output={"error": "timeout"},
+                            elapsed_ms=int((time.monotonic() - start) * 1000),
+                        )
+                if result.elapsed_ms == 0:
+                    result.elapsed_ms = int((time.monotonic() - start) * 1000)
+                # Track task → (agent, parent) for the snapshot's integration
+                # matrix. Done before the result publish so concurrent
+                # subscribers see consistent state.
+                parent_id = task.payload.get("parent_task_id")
+                if not isinstance(parent_id, str):
+                    parent_id = None
+                self._task_meta.append((task.id, result.agent_id, parent_id))
+                async with tracer.span("bus.publish", topic=RESULT_TOPIC):
+                    await self.bus.publish(RESULT_TOPIC, result)
+                self._recent_results.append(result)
+                if self.mc_layer is not None:
+                    async with tracer.span("mc.monitor"):
+                        await self._emit_mc_report()
+            return result
+        finally:
+            await tracer.finalize()
+            await self.bus.publish(TRACE_TOPIC, tracer.trace)
 
     async def _emit_mc_report(self) -> None:
         from awaking_os.consciousness.mc_layer import MC_REPORT_TOPIC

@@ -236,6 +236,9 @@ async def test_done_with_error_marks_failed(tmp_path: Path) -> None:
 
 
 async def test_concurrent_get_does_not_double_claim(tmp_path: Path) -> None:
+    """Within a single instance, the asyncio.Lock serializes get(), but the
+    conditional UPDATE in ``_claim_sync`` is the real correctness guarantee.
+    This exercises the in-process path."""
     db = tmp_path / "queue.sqlite"
     q = PersistentTaskQueue(db)
     for _ in range(4):
@@ -252,6 +255,35 @@ async def test_concurrent_get_does_not_double_claim(tmp_path: Path) -> None:
     assert len(ids) == 4
     assert q.pending_count == 0
     assert q.state_count(PersistentTaskQueue.IN_PROGRESS) == 4
+
+
+async def test_concurrent_get_across_instances_does_not_double_claim(
+    tmp_path: Path,
+) -> None:
+    """Multiple PersistentTaskQueue instances on the same db must not
+    double-claim a task. Each instance has its own asyncio.Lock — so the
+    only thing preventing duplicate claims is the conditional UPDATE
+    in ``_claim_sync`` (``WHERE state = 'pending'``). This test would
+    fail if the UPDATE were unconditional."""
+    db = tmp_path / "queue.sqlite"
+    q1 = PersistentTaskQueue(db)
+    q2 = PersistentTaskQueue(db)
+    q3 = PersistentTaskQueue(db)
+    q4 = PersistentTaskQueue(db)
+    for _ in range(4):
+        await q1.put(_task())
+
+    results = await asyncio.gather(
+        q1.get(timeout=2.0),
+        q2.get(timeout=2.0),
+        q3.get(timeout=2.0),
+        q4.get(timeout=2.0),
+    )
+    ids = {r.id for r in results if r is not None}
+    assert len(ids) == 4
+    # Every instance sees the same shared state.
+    assert q1.pending_count == 0
+    assert q4.state_count(PersistentTaskQueue.IN_PROGRESS) == 4
 
 
 def test_persistent_queue_max_attempts_must_be_positive(tmp_path: Path) -> None:

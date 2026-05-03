@@ -162,6 +162,61 @@ async def test_two_publishers_pointing_at_same_path_share_state(tmp_path: Path) 
     assert r2.prev_hash == r1.tx_hash
 
 
+async def test_publish_rolls_back_on_jsonl_append_failure(tmp_path: Path) -> None:
+    """If the JSONL append fails after the sqlite INSERT, the transaction
+    must roll back so the height isn't burned. Otherwise a chain hiccup
+    leaves a hole that breaks ``verify_chain``."""
+    pub = LocalJSONLPublisher(tmp_path / "chain.jsonl")
+    # Publish one block successfully so the chain isn't empty.
+    await pub.publish(_attestation("aa" * 32))
+    assert pub.block_count() == 1
+
+    # Force the next JSONL append to fail by pointing _path at a
+    # directory — `open("a")` on a directory raises IsADirectoryError.
+    pub._path = tmp_path
+
+    import pytest as _pytest
+
+    with _pytest.raises(IsADirectoryError):
+        await pub.publish(_attestation("bb" * 32))
+
+    # Rollback freed the height: ledger still shows only the first block.
+    assert pub.block_count() == 1
+    # And the next successful publish (after fixing the path) resumes
+    # at height 1, not 2.
+    pub._path = tmp_path / "chain.jsonl"
+    receipt = await pub.publish(_attestation("cc" * 32))
+    assert receipt.block_height == 1
+    assert pub.block_count() == 2
+    assert await pub.verify_chain() is True
+
+
+async def test_two_publishers_concurrently_get_distinct_heights(tmp_path: Path) -> None:
+    """Two LocalJSONLPublisher instances racing on the same chain must
+    still produce a strictly-monotonic, hash-linked chain. Each instance
+    has its own asyncio.Lock so the cross-instance serialization has to
+    come from sqlite's BEGIN IMMEDIATE write lock — not the asyncio one.
+    """
+    chain = tmp_path / "chain.jsonl"
+    a = LocalJSONLPublisher(chain)
+    b = LocalJSONLPublisher(chain)
+    atts = [_attestation(f"{i:064x}") for i in range(8)]
+    # Alternate publishes across the two instances and gather them all
+    # at once — the asyncio scheduler will interleave them freely.
+    receipts = await asyncio.gather(
+        *((a if i % 2 == 0 else b).publish(att) for i, att in enumerate(atts))
+    )
+    heights = sorted(r.block_height for r in receipts)
+    assert heights == list(range(8))
+    # Both publishers see the chain consistently.
+    assert a.block_count() == 8
+    assert b.block_count() == 8
+    # And the chain is intact — every block's prev_hash points at the
+    # previous block's tx_hash with no duplicate-height holes.
+    assert await a.verify_chain() is True
+    assert await b.verify_chain() is True
+
+
 # --- Receipt model --------------------------------------------------------
 
 

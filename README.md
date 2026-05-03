@@ -106,7 +106,7 @@ graph TD
 
 ### 1. The Kernel (A-Kernel)
 
-The A-Kernel is the core scheduler. Tasks are submitted, queued by priority, and dispatched to a registered agent. After every dispatch, the kernel publishes the result on the `kernel.result` topic and (when wired) emits a meta-cognition report on `mc.report`.
+The A-Kernel is the core scheduler. Tasks are submitted, queued by priority, and dispatched to a registered agent. After every dispatch, the kernel publishes the result on the `kernel.result` topic, a `TaskTrace` on `kernel.trace`, and (when wired) emits a meta-cognition report on `mc.report`.
 
 ```python
 import asyncio
@@ -173,7 +173,7 @@ agi_ram = AGIRam(
     db_path="./data/agi.sqlite",
     vector_store=ChromaVectorStore(persist_path="./data/chroma"),
     embedding_provider=FakeEmbeddingProvider(),     # or SentenceTransformer
-    signer=DeSciSigner(),                           # optional ed25519 attestation
+    signer=DeSciSigner.from_seed(b"\x00" * 32),     # optional ed25519 attestation (use a real seed!)
 )
 
 node_id = await agi_ram.store(
@@ -208,11 +208,12 @@ Min-cut Phi (exact for n ≤ 6):        █████████████�
 Sqlite LLM response cache:            ████████████████████ 100%
 On-chain DeSci publication (local JSONL): ████████████████████ 100%
 Persistent task queue + recovery:     ████████████████████ 100%
+Structured per-task tracing:          ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                343 passing (96% line coverage)
+Tests:                364 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -240,6 +241,12 @@ Task queue:           InMemoryTaskQueue (default, asyncio.PriorityQueue)
                       attempt_count + max_attempts cap, audit history of
                       every completed task). Both implement TaskQueue ABC;
                       kernel takes either via task_queue= kwarg.
+Tracing:              Per-task TaskTrace with nested Spans (dispatch →
+                      build_context, agent.execute, bus.publish, mc.monitor).
+                      Async context manager span() captures elapsed +
+                      attrs + errors. Published on kernel.trace topic;
+                      JSONLTraceSink optionally persists one trace per
+                      line. Set AWAKING_TRACE_DIR to enable.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at
@@ -294,6 +301,7 @@ For a real LLM, set `ANTHROPIC_API_KEY` (the CLI will pick it up automatically).
 | `AWAKING_LLM_CACHE_TTL=3600` | TTL in seconds for cached responses (only active when `AWAKING_LLM_CACHE_DB` is set). |
 | `AWAKING_LLM_GRADER=1` | Adds an LLM-backed alignment grader to the `EthicalFilter`. The filter combines the LLM score with the rule-based score via `min` — an LLM can never make alignment look better than the rules say, only worse. |
 | `AWAKING_DATA_DIR=/path` | Where AGI-RAM persists the knowledge-graph sqlite (default `.awaking`). |
+| `AWAKING_TRACE_DIR=/path` | Enables `JSONLTraceSink`. Every dispatched task appends one JSON-encoded `TaskTrace` line to `<dir>/traces.jsonl`. |
 
 ---
 

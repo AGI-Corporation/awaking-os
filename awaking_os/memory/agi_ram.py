@@ -34,16 +34,22 @@ class AGIRam:
         embedding_provider: EmbeddingProvider | None = None,
         signer: object | None = None,  # DeSciSigner; kept loose to avoid import cycle
         publisher: object | None = None,  # OnChainPublisher; loose for the same reason
+        max_receipts: int = 1024,
     ) -> None:
+        if max_receipts < 1:
+            raise ValueError("max_receipts must be at least 1")
         self.graph = NetworkXKnowledgeGraph(db_path=db_path)
         self.vector_store = vector_store
         self.embedding_provider = embedding_provider
         self.signer = signer
         self.publisher = publisher
-        # Records publication receipts keyed by node_id, populated as
-        # store()'s background publish completes. Useful for tests and
-        # for callers that want to surface chain receipts in their UI.
+        # FIFO-bounded by ``max_receipts``. Python dicts preserve
+        # insertion order (CPython 3.7+), so popping the first key
+        # evicts the oldest receipt. Without a cap, a long-running
+        # process publishing a node per second leaks ~1KB/sec into
+        # this dict.
         self.receipts: dict[str, object] = {}
+        self._max_receipts = max_receipts
 
     @property
     def semantic_enabled(self) -> bool:
@@ -88,6 +94,8 @@ class AGIRam:
             try:
                 receipt = await self.publisher.publish(node.attestation)  # type: ignore[attr-defined]
                 self.receipts[node_id] = receipt
+                if len(self.receipts) > self._max_receipts:
+                    self.receipts.pop(next(iter(self.receipts)))
             except Exception:
                 # Publication is a best-effort step — never fail the
                 # store on a chain hiccup. Caller can re-publish later.

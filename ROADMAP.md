@@ -6,7 +6,7 @@ ROADMAP is what comes after.
 
 Status legend: ✅ shipped · 🚧 in-flight · 📋 planned · 💤 explicitly out of scope
 
-Last updated: 2026-05-02 (after commit `859d2ef`).
+Last updated: 2026-05-03 (after commit `2d7eab5`).
 
 ---
 
@@ -62,11 +62,22 @@ These items strengthen the foundation. Order roughly reflects dependency.
 - Kernel `run()` now records success/failure metadata via `queue.done()`,
   including the agent's self-reported error from `output["error"]`
 
-### C.3 — Structured tracing
-- Per-task `TaskTrace` capturing every span (build_context, agent.execute, MC.monitor, vector upsert, etc.) with timing
-- Trace published on `kernel.trace` topic alongside results
-- Optional JSONL sink + a `trace.py` CLI for querying past traces
-- Foundation for OpenTelemetry export later
+### C.3 — Structured tracing ✅
+- `observability.trace.Tracer` produces a `TaskTrace` with a flat list
+  of `Span` nodes that form a tree via `parent_span_id`. Async context
+  manager `tracer.span()` opens/closes spans with elapsed timing and
+  per-span attributes; exceptions are recorded into `Span.error` and
+  re-raised
+- Kernel wraps every dispatch in a root `dispatch` span with nested
+  `build_context`, `agent.execute`, `bus.publish`, and (optionally)
+  `mc.monitor` children. Timeouts surface as `error="timeout"` on
+  the agent.execute span
+- `TraceSink` ABC with `NullTraceSink` (default) and `JSONLTraceSink`
+  (one trace per line, asyncio.Lock + thread for concurrent writes)
+- Trace published on `kernel.trace` topic alongside the result; full
+  pydantic round-trip so a future OpenTelemetry exporter slots in
+- CLI env knob: `AWAKING_TRACE_DIR` enables the JSONL sink at
+  `<dir>/traces.jsonl`
 
 ### C.4 — Retry & error policy
 - Today: agent failures are caught and turned into a result with `output={"error": ...}`. No retry.

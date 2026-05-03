@@ -151,15 +151,32 @@ class LocalJSONLPublisher(OnChainPublisher):
 
     async def publish(self, attestation: DeSciAttestation) -> PublicationReceipt:
         async with self._lock:
-            with sqlite3.connect(self._ledger_path) as conn:
+            return await asyncio.to_thread(self._publish_sync, attestation)
+
+    def _publish_sync(self, attestation: DeSciAttestation) -> PublicationReceipt:
+        # ``isolation_level=None`` puts the connection in autocommit mode
+        # so we can issue an explicit ``BEGIN IMMEDIATE``. That acquires
+        # sqlite's RESERVED write lock at the start of the critical
+        # section, blocking any other writer (in-process *or* across
+        # processes) until we COMMIT or ROLLBACK. Without this, two
+        # publishers can both read the same max ``block_height`` and
+        # both append a duplicate-height line to the JSONL before either
+        # INSERT lands.
+        conn = sqlite3.connect(self._ledger_path, isolation_level=None)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
                 # Idempotent re-publish: the same node_hash always
-                # returns its existing receipt.
+                # returns its existing receipt. Releasing the write lock
+                # via ROLLBACK (we made no changes) lets other waiters
+                # proceed immediately.
                 row = conn.execute(
                     "SELECT block_height, tx_hash, prev_hash FROM blocks WHERE node_hash = ?",
                     (attestation.node_hash,),
                 ).fetchone()
                 if row is not None:
                     height, tx_hash, prev_hash = row
+                    conn.execute("ROLLBACK")
                     return PublicationReceipt(
                         block_height=int(height),
                         tx_hash=tx_hash,
@@ -199,25 +216,39 @@ class LocalJSONLPublisher(OnChainPublisher):
                     "published_at": published_at.isoformat(),
                 }
 
-                # Append + fsync so the JSONL is durable before the
-                # ledger commits.
-                with self._path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(block, separators=(",", ":")) + "\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-
+                # Reserve the height in sqlite first. The PK constraint
+                # on ``block_height`` plus the BEGIN IMMEDIATE write
+                # lock guarantee no concurrent publisher can claim the
+                # same height. If the JSONL append below fails, the
+                # rollback frees the height for the next attempt.
                 conn.execute(
                     "INSERT INTO blocks (block_height, tx_hash, node_hash, prev_hash) "
                     "VALUES (?, ?, ?, ?)",
                     (block_height, tx_hash, attestation.node_hash, prev_hash),
                 )
-                return PublicationReceipt(
-                    block_height=block_height,
-                    tx_hash=tx_hash,
-                    prev_hash=prev_hash,
-                    node_hash=attestation.node_hash,
-                    published_at=published_at,
-                )
+
+                # Append + fsync the JSONL while the write lock is held
+                # so no other publisher can interleave a line at the
+                # same height.
+                with self._path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(block, separators=(",", ":")) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+            return PublicationReceipt(
+                block_height=block_height,
+                tx_hash=tx_hash,
+                prev_hash=prev_hash,
+                node_hash=attestation.node_hash,
+                published_at=published_at,
+            )
+        finally:
+            conn.close()
 
     async def find(self, node_hash: str) -> PublicationReceipt | None:
         with sqlite3.connect(self._ledger_path) as conn:
