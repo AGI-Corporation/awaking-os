@@ -4,6 +4,7 @@ from awaking_os.kernel.bus import IACBus
 from awaking_os.kernel.kernel import RESULT_TOPIC, TRACE_TOPIC, AKernel
 from awaking_os.kernel.queue import InMemoryTaskQueue, PersistentTaskQueue, TaskQueue
 from awaking_os.kernel.registry import AgentRegistry
+from awaking_os.kernel.retry import RetryPolicy
 from awaking_os.kernel.task import AgentContext, AgentResult, AgentTask
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "PersistentTaskQueue",
     "RESULT_TOPIC",
     "TRACE_TOPIC",
+    "RetryPolicy",
     "TaskQueue",
 ]

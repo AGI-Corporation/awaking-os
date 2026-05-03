@@ -209,11 +209,12 @@ Sqlite LLM response cache:            ██████████████
 On-chain DeSci publication (local JSONL): ████████████████████ 100%
 Persistent task queue + recovery:     ████████████████████ 100%
 Structured per-task tracing:          ████████████████████ 100%
+Per-task retry policy + backoff:      ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                364 passing (96% line coverage)
+Tests:                382 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -247,6 +248,12 @@ Tracing:              Per-task TaskTrace with nested Spans (dispatch →
                       attrs + errors. Published on kernel.trace topic;
                       JSONLTraceSink optionally persists one trace per
                       line. Set AWAKING_TRACE_DIR to enable.
+Retry policy:         Optional RetryPolicy on AgentTask drives
+                      exponential backoff (initial_backoff_s, multiplier,
+                      max_backoff_s, retry_on_errors substring filter).
+                      Kernel re-pends failed tasks via async backoff;
+                      task.attempts increments per retry; idempotency is
+                      the agent's contract.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at

@@ -79,10 +79,20 @@ These items strengthen the foundation. Order roughly reflects dependency.
 - CLI env knob: `AWAKING_TRACE_DIR` enables the JSONL sink at
   `<dir>/traces.jsonl`
 
-### C.4 — Retry & error policy
-- Today: agent failures are caught and turned into a result with `output={"error": ...}`. No retry.
-- Add `RetryPolicy(max_attempts, backoff_s, retry_on)` per AgentTask
-- Idempotency keys via `task.id` so a retried task doesn't double-write to AGI-RAM
+### C.4 — Retry & error policy ✅
+- `kernel.retry.RetryPolicy` per `AgentTask`: `max_attempts`,
+  `initial_backoff_s`, `multiplier`, `max_backoff_s`,
+  `retry_on_errors` (substring filter — empty = retry on any failure).
+- Kernel run loop sees a failure, asks the policy, re-pends the task
+  via `_delayed_resubmit` (asyncio.sleep + queue.put) without
+  blocking the dispatch loop. Final audit only happens when retries
+  are exhausted or the task succeeds.
+- `AgentTask.attempts` increments across retries — agents that need
+  attempt-aware behavior (e.g. exponential token budgeting) read it
+  directly. Idempotency is the agent's contract: same `task.id`
+  across retries; agents that mutate external state must dedupe.
+- Shutdown cancels in-flight retry backoffs so the loop exits
+  promptly without leaking asyncio tasks.
 
 ### C.5 — Worker pool / parallel dispatch
 - Today: single dispatch loop, one task at a time

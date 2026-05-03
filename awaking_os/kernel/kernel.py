@@ -62,6 +62,9 @@ class AKernel:
         self.trace_sink: TraceSink = trace_sink if trace_sink is not None else NullTraceSink()
         self._stopping = asyncio.Event()
         self._run_task: asyncio.Task[None] | None = None
+        # In-flight retry backoffs. Tracked so shutdown can cancel them
+        # promptly and asyncio doesn't warn about un-awaited coroutines.
+        self._retry_tasks: set[asyncio.Task[None]] = set()
         self._recent_results: deque[AgentResult] = deque(maxlen=snapshot_window)
         # task_id → (producing agent_id, parent_task_id from payload). Sized to
         # the snapshot window so it doesn't grow unbounded.
@@ -220,9 +223,53 @@ class AKernel:
                 elapsed_ms = int((time.monotonic() - start) * 1000)
                 logger.exception("Dispatch failed for task %s", task.id)
             finally:
-                await self.task_queue.done(
-                    task.id, success=success, elapsed_ms=elapsed_ms, error=error
-                )
+                # Decide retry vs final-audit. If the task has a retry
+                # policy with budget left and a retryable error, the
+                # kernel re-pends it after a backoff (without recording
+                # a final done() yet). Otherwise the queue audit closes
+                # this attempt.
+                attempts_so_far = task.attempts + 1
+                if (
+                    not success
+                    and task.retry_policy is not None
+                    and task.retry_policy.should_retry(attempts_so_far, error)
+                ):
+                    delay_s = task.retry_policy.backoff_s(attempts_so_far)
+                    retried = task.model_copy(update={"attempts": attempts_so_far})
+                    self._track_retry(retried, delay_s)
+                else:
+                    await self.task_queue.done(
+                        task.id, success=success, elapsed_ms=elapsed_ms, error=error
+                    )
+
+    def _track_retry(self, task: AgentTask, delay_s: float) -> None:
+        """Schedule a retry without blocking the dispatch loop.
+
+        The resubmit task is stashed on ``self._retry_tasks`` so
+        :meth:`shutdown` can wait for in-flight backoffs to complete or
+        be cancelled — otherwise asyncio would warn about an
+        un-awaited coroutine on shutdown.
+        """
+        coro = self._delayed_resubmit(task, delay_s)
+        retry_task = asyncio.create_task(coro)
+        self._retry_tasks.add(retry_task)
+        retry_task.add_done_callback(self._retry_tasks.discard)
+
+    async def _delayed_resubmit(self, task: AgentTask, delay_s: float) -> None:
+        try:
+            if delay_s > 0:
+                await asyncio.sleep(delay_s)
+            if self._stopping.is_set():
+                # Shutdown started while we were sleeping; the retry is
+                # silently dropped. The queue's audit row is still in
+                # ``in_progress`` from the original get() — recovery on
+                # the next process startup will re-pend it.
+                return
+            await self.task_queue.put(task)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to resubmit task %s for retry", task.id)
 
     def start(self) -> asyncio.Task[None]:
         if self._run_task is not None and not self._run_task.done():
@@ -233,6 +280,11 @@ class AKernel:
 
     async def shutdown(self) -> None:
         self._stopping.set()
+        # Cancel any pending retry-backoffs so shutdown is prompt.
+        for retry_task in list(self._retry_tasks):
+            retry_task.cancel()
+        if self._retry_tasks:
+            await asyncio.gather(*self._retry_tasks, return_exceptions=True)
         if self._run_task is not None:
             await self._run_task
             self._run_task = None
