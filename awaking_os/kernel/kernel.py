@@ -149,8 +149,18 @@ class AKernel:
                         await self._emit_mc_report()
             return result
         finally:
-            await tracer.finalize()
-            await self.bus.publish(TRACE_TOPIC, tracer.trace)
+            # Trace persistence + publication is observability — it must
+            # NEVER shadow the actual task outcome. Otherwise a sink that
+            # raised would look like a task failure to the run loop and
+            # trigger spurious retries.
+            try:
+                await tracer.finalize()
+            except Exception:
+                logger.exception("Failed to finalize trace for task %s", task.id)
+            try:
+                await self.bus.publish(TRACE_TOPIC, tracer.trace)
+            except Exception:
+                logger.exception("Failed to publish trace for task %s", task.id)
 
     async def _emit_mc_report(self) -> None:
         from awaking_os.consciousness.mc_layer import MC_REPORT_TOPIC
@@ -236,10 +246,20 @@ class AKernel:
 
     async def _worker_loop(self) -> None:
         while not self._stopping.is_set():
-            task = await self.task_queue.get(timeout=0.1)
-            if task is None:
-                continue
-            await self._process_one(task)
+            try:
+                task = await self.task_queue.get(timeout=0.1)
+                if task is None:
+                    continue
+                await self._process_one(task)
+            except asyncio.CancelledError:
+                # Hard shutdown — propagate so the worker exits.
+                raise
+            except Exception:
+                # A single bad iteration (sqlite hiccup, unexpected raise
+                # inside _process_one's finally) must NOT take the whole
+                # pool down. Log and keep polling so the kernel stays
+                # responsive for subsequent tasks.
+                logger.exception("Worker loop iteration failed; continuing")
 
     async def _process_one(self, task: AgentTask) -> None:
         success = True
@@ -293,20 +313,36 @@ class AKernel:
         retry_task.add_done_callback(self._retry_tasks.discard)
 
     async def _delayed_resubmit(self, task: AgentTask, delay_s: float) -> None:
+        # Early exit: if shutdown raced ahead of our schedule, don't even
+        # start the backoff sleep. The queue row stays in_progress and
+        # PersistentTaskQueue._recover_in_progress will re-pend it on
+        # the next process startup.
+        if self._stopping.is_set():
+            return
         try:
             if delay_s > 0:
                 await asyncio.sleep(delay_s)
             if self._stopping.is_set():
-                # Shutdown started while we were sleeping; the retry is
-                # silently dropped. The queue's audit row is still in
-                # ``in_progress`` from the original get() — recovery on
-                # the next process startup will re-pend it.
+                # Shutdown happened during the sleep; same recovery path.
                 return
             await self.task_queue.put(task)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as e:
+            # put() itself failed (e.g., sqlite write error). The task
+            # would otherwise be orphaned with state=in_progress until
+            # the next restart. Close the audit row as failed so callers
+            # see a definitive outcome.
             logger.exception("Failed to resubmit task %s for retry", task.id)
+            try:
+                await self.task_queue.done(
+                    task.id,
+                    success=False,
+                    elapsed_ms=0,
+                    error=f"retry-resubmit-failed: {e!r}",
+                )
+            except Exception:
+                logger.exception("Also failed to close audit row for task %s", task.id)
 
     def start(self) -> asyncio.Task[None]:
         if self._run_task is not None and not self._run_task.done():
@@ -317,14 +353,22 @@ class AKernel:
 
     async def shutdown(self) -> None:
         self._stopping.set()
-        # Cancel any pending retry-backoffs so shutdown is prompt.
+        # Cancel currently-pending retries so their backoff sleeps abort
+        # immediately. Done before waiting on workers because a
+        # multi-second backoff would otherwise stretch shutdown latency.
         for retry_task in list(self._retry_tasks):
             retry_task.cancel()
-        if self._retry_tasks:
-            await asyncio.gather(*self._retry_tasks, return_exceptions=True)
+        # Wait for the worker pool to drain in-flight dispatches.
+        # Workers see _stopping at their next loop iteration and exit.
         if self._run_task is not None:
             await self._run_task
             self._run_task = None
+        # A worker may have scheduled a new retry between our cancel
+        # snapshot and the run-task drain. Those tasks see _stopping
+        # set on entry and return immediately, but we still gather them
+        # so asyncio doesn't warn about un-awaited coroutines.
+        if self._retry_tasks:
+            await asyncio.gather(*self._retry_tasks, return_exceptions=True)
 
     @property
     def pending_count(self) -> int:
