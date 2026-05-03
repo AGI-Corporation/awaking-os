@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from awaking_os.agents.base import Agent
-from awaking_os.agents.personas import PERSONAS, Persona
+from awaking_os.agents.personas import Persona, resolve_personas
 from awaking_os.io.search import SearchHit, SearchTool
 from awaking_os.kernel.task import AgentContext, AgentResult
 from awaking_os.llm.provider import LLMProvider
@@ -103,10 +103,8 @@ class ResearchAgent(Agent):
 
     @staticmethod
     def _resolve_persona(payload: dict) -> Persona | None:
-        name = payload.get("persona")
-        if not isinstance(name, str):
-            return None
-        return PERSONAS.get(name.lower())
+        # Accepts a single name or a list of names — see :func:`resolve_personas`.
+        return resolve_personas(payload.get("persona"))
 
     @staticmethod
     def _format_prompt(topic: str, hits: list[SearchHit]) -> str:

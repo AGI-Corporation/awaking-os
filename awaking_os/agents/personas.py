@@ -105,6 +105,42 @@ PERSONAS: dict[str, Persona] = {
         ),
         tags=("transformation", "refinement", "structure"),
     ),
+    # --- Domain-specific personas (Phase D.5) -----------------------------
+    "bioethicist": Persona(
+        name="bioethicist",
+        description="Bioethics and dual-use research review",
+        system_prompt_fragment=(
+            "Adopt the perspective of a bioethicist. Surface dual-use risks, "
+            "informed-consent concerns, vulnerable-population impacts, and "
+            "downstream misuse potential. Cite relevant frameworks (Belmont, "
+            "Nuffield, Helsinki) only when they sharpen a concrete concern; "
+            "reject hand-waving generalities."
+        ),
+        tags=("bioethics", "dual_use", "biotic", "domain"),
+    ),
+    "devsecops": Persona(
+        name="devsecops",
+        description="Secure deployment, supply-chain, and observability",
+        system_prompt_fragment=(
+            "Adopt the perspective of a devsecops engineer. Examine deployment "
+            "topology, supply-chain provenance, secrets handling, observability "
+            "and rollback paths, blast-radius containment, and the difference "
+            "between detection and prevention. Concrete fixes over policy."
+        ),
+        tags=("security", "deployment", "infrastructure", "domain"),
+    ),
+    "distributed-systems-architect": Persona(
+        name="distributed-systems-architect",
+        description="Consistency, partitioning, and failure-mode analysis",
+        system_prompt_fragment=(
+            "Adopt the perspective of a distributed-systems architect. Reason "
+            "about consistency models, partition tolerance, idempotency, retry "
+            "and back-pressure semantics, ordering guarantees, and the failure "
+            "modes that production exposes that staging hides. State the "
+            "assumptions you're making about clock drift and message ordering."
+        ),
+        tags=("distributed_systems", "consistency", "reliability", "domain"),
+    ),
 }
 
 
@@ -121,3 +157,57 @@ def list_personas() -> list[Persona]:
 
 def get_personas_by_tag(tag: str) -> list[Persona]:
     return [p for p in PERSONAS.values() if tag in p.tags]
+
+
+def compose_personas(*personas: Persona) -> Persona:
+    """Stack multiple personas into one synthetic Persona.
+
+    Useful when an agent benefits from multiple perspectives — e.g.,
+    a bioethicist (``bioethicist``) reviewing a security analyst's
+    threat model (``vine``). The composite's ``name`` joins the parts
+    with ``+`` for traceability; ``tags`` are unioned; the system
+    prompt fragments are concatenated with blank-line separators in
+    the order given so the LLM sees one persona's lens, then the next.
+
+    Single-persona input returns the persona unchanged so callers can
+    pass either a 1-list or a single persona without branching.
+    """
+    if not personas:
+        raise ValueError("compose_personas requires at least one persona")
+    if len(personas) == 1:
+        return personas[0]
+    name = "+".join(p.name for p in personas)
+    description = "Composite: " + "; ".join(p.description for p in personas)
+    fragment = "\n\n".join(p.system_prompt_fragment for p in personas)
+    tags = tuple(sorted({t for p in personas for t in p.tags}))
+    return Persona(
+        name=name,
+        description=description,
+        system_prompt_fragment=fragment,
+        tags=tags,
+    )
+
+
+def resolve_personas(spec: object) -> Persona | None:
+    """Resolve a payload's ``persona`` value to a (possibly composite) Persona.
+
+    Accepts:
+    - ``str`` → look up a single persona; case-insensitive
+    - ``list[str]`` → look up each, drop unknowns, compose into one
+    - anything else (or empty result) → ``None``
+
+    Used by agents (Semantic, Reasoning) so they share the same
+    payload semantics: ``payload["persona"]="bael"`` and
+    ``payload["persona"]=["bael", "vine"]`` both work.
+    """
+    if isinstance(spec, str):
+        return PERSONAS.get(spec.lower())
+    if isinstance(spec, list):
+        resolved: list[Persona] = []
+        for entry in spec:
+            if isinstance(entry, str) and entry.lower() in PERSONAS:
+                resolved.append(PERSONAS[entry.lower()])
+        if not resolved:
+            return None
+        return compose_personas(*resolved)
+    return None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from awaking_os.agents.base import Agent
-from awaking_os.agents.personas import PERSONAS, Persona
+from awaking_os.agents.personas import Persona, resolve_personas
 from awaking_os.kernel.task import AgentContext, AgentResult
 from awaking_os.llm.provider import LLMProvider
 from awaking_os.memory.agi_ram import AGIRam
@@ -104,10 +104,10 @@ class SemanticAgent(Agent):
 
     @staticmethod
     def _resolve_persona(payload: dict) -> Persona | None:
-        name = payload.get("persona")
-        if not isinstance(name, str):
-            return None
-        return PERSONAS.get(name.lower())
+        # Accepts a single name (``"bael"``) or a list (``["bael", "vine"]``)
+        # — list form returns a composed persona that stacks the
+        # fragments. See :func:`resolve_personas`.
+        return resolve_personas(payload.get("persona"))
 
     @staticmethod
     def _format_memory(nodes: list[KnowledgeNode]) -> str:

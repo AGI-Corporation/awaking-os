@@ -6,7 +6,7 @@ ROADMAP is what comes after.
 
 Status legend: ✅ shipped · 🚧 in-flight · 📋 planned · 💤 explicitly out of scope
 
-Last updated: 2026-05-03 (after commit `cfe5454`).
+Last updated: 2026-05-03 (after commit `aab4c4a`).
 
 ---
 
@@ -149,10 +149,22 @@ These items strengthen the foundation. Order roughly reflects dependency.
 - Add `OpenAIProvider`, `GeminiProvider` behind a `[multi-llm]` extra
 - All implement the same `LLMProvider` interface; CachingLLMProvider works unchanged
 
-### D.5 — More personas
-- Today: 8 personas salvaged from shadow_catalog
-- Add domain-specific ones: bioethicist, devsecops, distributed-systems-architect, etc.
-- Composition: allow stacking personas (concatenate fragments)
+### D.5 — More personas ✅
+- Three new domain-specific personas added: ``bioethicist``,
+  ``devsecops``, ``distributed-systems-architect``. Each carries the
+  ``domain`` tag so consumers can enumerate the new bench.
+- ``compose_personas(*personas)`` returns a synthetic Persona with
+  fragments concatenated in order, tags unioned, and a name joined by
+  ``+`` for traceability. Single-persona input is a no-op so callers
+  can pass either a 1-list or a single persona without branching.
+- ``resolve_personas(spec)`` accepts ``str``, ``list[str]``, or
+  anything else. List form composes the resolved personas; unknown
+  entries are dropped (best-effort), an all-unknown list returns
+  ``None``. ``SemanticAgent`` and ``ResearchAgent`` both delegate to
+  this helper, so ``payload["persona"] = ["bael", "vine"]`` stacks
+  perspectives in the LLM's system prompt while
+  ``payload["persona"] = "bael"`` keeps the legacy single-persona
+  behavior byte-identical.
 
 ---
 

@@ -88,6 +88,38 @@ async def _dummy_submit(task: AgentTask) -> str:
     return task.id
 
 
+# --- Ethical constraint inheritance ---------------------------------------
+
+
+async def test_subtasks_inherit_ethical_constraints(semantic_agi_ram) -> None:
+    """A child reasoning step must see the parent's ethical boundary —
+    otherwise the safety contract leaks across the chain. Mirrors
+    ExecutiveAgent._decompose's convention."""
+    submitted: list[AgentTask] = []
+
+    async def submit(t: AgentTask) -> str:
+        submitted.append(t)
+        return t.id
+
+    llm = _ScriptedLLM(rules=[("seed", "FOLLOWUP: Q1 | Q2")])
+    agent = ReasoningSemanticAgent(llm=llm, agi_ram=semantic_agi_ram, submit=submit)
+
+    parent = AgentTask(
+        id=str(uuid4()),
+        priority=50,
+        agent_type=AgentType.SEMANTIC,
+        payload={"q": "seed", "depth": 0},
+        ethical_constraints=["no_personal_data", "no_external_egress"],
+    )
+    await agent.execute(_ctx(parent))
+    assert len(submitted) == 2
+    for child in submitted:
+        assert child.ethical_constraints == [
+            "no_personal_data",
+            "no_external_egress",
+        ]
+
+
 # --- Single-step ANSWER path ----------------------------------------------
 
 

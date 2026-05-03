@@ -212,11 +212,12 @@ Structured per-task tracing:          ██████████████
 Per-task retry policy + backoff:      ████████████████████ 100%
 Worker pool / parallel dispatch:      ████████████████████ 100%
 Multi-step reasoning agent:           ████████████████████ 100%
+Persona library + stacking:           ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                408 passing (96% line coverage)
+Tests:                427 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -264,12 +265,19 @@ Worker pool:          AKernel(concurrency=N) spawns N _worker_loop
                       timestamps so concurrent dispatches don't garble
                       the integration matrix.
 Reasoning agent:      ReasoningSemanticAgent fans out FOLLOWUP sub-tasks
-                      via kernel.submit (parent_task_id + depth carried
-                      in payload). Termination: max_depth cap. Sub-tasks
-                      are fire-and-forget — the parent returns spawned
-                      ids; children land on kernel.result independently.
+                      via kernel.submit (parent_task_id + depth + parent
+                      ethical_constraints carried in the child payload).
+                      Termination: max_depth cap. Sub-tasks are fire-
+                      and-forget — the parent returns spawned ids;
+                      children land on kernel.result independently.
                       Composes with retry (unparseable LLM = retryable
                       error) and concurrency (siblings run in parallel).
+Personas:             11 system-prompt fragments — 8 from the original
+                      catalog + bioethicist / devsecops /
+                      distributed-systems-architect (D.5). Stack via
+                      payload["persona"] = ["bael", "vine"] — the LLM
+                      sees both fragments concatenated, the composite
+                      name + tag union are recorded on the result node.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at

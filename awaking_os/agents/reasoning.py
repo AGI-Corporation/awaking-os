@@ -113,6 +113,10 @@ class ReasoningSemanticAgent(Agent):
                             "parent_task_id": task.id,
                             "depth": depth + 1,
                         },
+                        # Propagate ethical_constraints so child reasoning
+                        # steps inherit the parent's safety boundary —
+                        # matches ExecutiveAgent._decompose's convention.
+                        ethical_constraints=task.ethical_constraints,
                     )
                     await self.submit(sub)
                     sub_task_ids.append(sub.id)

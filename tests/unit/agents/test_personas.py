@@ -9,9 +9,11 @@ import pytest
 from awaking_os.agents.personas import (
     PERSONAS,
     Persona,
+    compose_personas,
     get_persona,
     get_personas_by_tag,
     list_personas,
+    resolve_personas,
 )
 from awaking_os.agents.research import ResearchAgent
 from awaking_os.agents.semantic import SemanticAgent
@@ -141,3 +143,150 @@ async def test_no_persona_means_no_fragment(
     await semantic_agent.execute(_semantic_task({"q": "X"}))
     # Default system prompt is used as-is (no persona prefix)
     assert fake_llm.calls[0].system.startswith("You are the Semantic Agent")
+
+
+# --- Phase D.5: domain-specific personas + stacking -----------------------
+
+
+def test_domain_personas_are_registered() -> None:
+    """The Phase D.5 personas exist with the expected descriptors."""
+    for name in ("bioethicist", "devsecops", "distributed-systems-architect"):
+        assert name in PERSONAS
+        p = PERSONAS[name]
+        assert "domain" in p.tags  # all D.5 personas tagged "domain"
+        assert p.system_prompt_fragment  # non-empty
+
+
+def test_compose_personas_requires_at_least_one() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        compose_personas()
+
+
+def test_compose_personas_returns_single_unchanged() -> None:
+    """A 1-persona composition is a no-op so callers can pass either
+    one persona or a list without branching."""
+    p = compose_personas(get_persona("bael"))
+    assert p is get_persona("bael")
+
+
+def test_compose_personas_concatenates_fragments_in_order() -> None:
+    bael = get_persona("bael")
+    vine = get_persona("vine")
+    composite = compose_personas(bael, vine)
+    # Fragment is bael THEN vine, separated by a blank line.
+    assert composite.system_prompt_fragment.startswith(bael.system_prompt_fragment)
+    assert composite.system_prompt_fragment.endswith(vine.system_prompt_fragment)
+    assert "\n\n" in composite.system_prompt_fragment
+
+
+def test_compose_personas_unions_tags() -> None:
+    bael = get_persona("bael")  # privacy, stealth, security
+    vine = get_persona("vine")  # security, vulnerability, adversarial
+    composite = compose_personas(bael, vine)
+    # All three tags from each parent appear; "security" is unioned (not duplicated).
+    assert set(composite.tags) == {
+        "privacy",
+        "stealth",
+        "security",
+        "vulnerability",
+        "adversarial",
+    }
+
+
+def test_compose_personas_name_joins_with_plus() -> None:
+    composite = compose_personas(get_persona("bael"), get_persona("vine"))
+    assert composite.name == "bael+vine"
+
+
+def test_resolve_personas_accepts_single_string() -> None:
+    p = resolve_personas("bael")
+    assert p is not None and p.name == "bael"
+
+
+def test_resolve_personas_is_case_insensitive() -> None:
+    p = resolve_personas("BAEL")
+    assert p is not None and p.name == "bael"
+
+
+def test_resolve_personas_unknown_returns_none() -> None:
+    assert resolve_personas("nonexistent") is None
+
+
+def test_resolve_personas_accepts_list() -> None:
+    composite = resolve_personas(["bael", "vine"])
+    assert composite is not None
+    assert composite.name == "bael+vine"
+
+
+def test_resolve_personas_drops_unknown_entries_in_list() -> None:
+    """A list with mixed known/unknown names returns the composite of
+    the knowns rather than failing — best-effort, so a typo doesn't
+    break the chain when the rest of the stack is valid."""
+    composite = resolve_personas(["bael", "nonexistent", "vine"])
+    assert composite is not None
+    assert composite.name == "bael+vine"
+
+
+def test_resolve_personas_all_unknown_list_returns_none() -> None:
+    assert resolve_personas(["nonexistent", "alsobad"]) is None
+
+
+def test_resolve_personas_empty_list_returns_none() -> None:
+    assert resolve_personas([]) is None
+
+
+def test_resolve_personas_invalid_type_returns_none() -> None:
+    assert resolve_personas(42) is None
+    assert resolve_personas(None) is None
+    assert resolve_personas({"persona": "bael"}) is None
+
+
+# --- SemanticAgent + persona stacking -------------------------------------
+
+
+async def test_semantic_agent_stacks_persona_list_in_system_prompt(
+    semantic_agent: SemanticAgent, fake_llm: FakeLLMProvider
+) -> None:
+    """A list-form persona stacks fragments — the LLM sees both
+    perspectives in its system prompt."""
+    await semantic_agent.execute(_semantic_task({"q": "X", "persona": ["bael", "vine"]}))
+    sys = fake_llm.calls[0].system
+    # bael's "stealth" + vine's "security analyst" both present.
+    assert "privacy and stealth" in sys
+    assert "security analyst" in sys
+
+
+async def test_semantic_agent_records_composite_persona_name(
+    semantic_agent: SemanticAgent, semantic_agi_ram
+) -> None:
+    """Knowledge node metadata stores the composite name so the trail
+    of which personas were active is auditable."""
+    result = await semantic_agent.execute(_semantic_task({"q": "X", "persona": ["bael", "vine"]}))
+    node = await semantic_agi_ram.get(result.knowledge_nodes_created[0])
+    assert node is not None
+    assert node.metadata["persona"] == "bael+vine"
+
+
+async def test_semantic_agent_uses_d5_domain_persona(
+    semantic_agent: SemanticAgent, fake_llm: FakeLLMProvider
+) -> None:
+    """A D.5 persona name (e.g. distributed-systems-architect) flows
+    end-to-end through the existing payload contract."""
+    await semantic_agent.execute(
+        _semantic_task({"q": "X", "persona": "distributed-systems-architect"})
+    )
+    sys = fake_llm.calls[0].system
+    assert "distributed-systems architect" in sys
+    assert "consistency models" in sys
+
+
+# --- ResearchAgent + persona stacking -------------------------------------
+
+
+async def test_research_agent_stacks_persona_list(
+    research_agent: ResearchAgent, fake_llm: FakeLLMProvider
+) -> None:
+    await research_agent.execute(_research_task({"topic": "Phi", "persona": ["astaroth", "vine"]}))
+    sys = fake_llm.calls[0].system
+    assert "auditor" in sys
+    assert "security analyst" in sys
