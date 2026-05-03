@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 import logging
 import time
 from collections import deque
@@ -11,6 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from awaking_os.kernel.bus import IACBus
+from awaking_os.kernel.queue import InMemoryTaskQueue, TaskQueue
 from awaking_os.kernel.registry import AgentRegistry
 from awaking_os.kernel.task import AgentContext, AgentResult, AgentTask
 
@@ -27,12 +27,12 @@ RESULT_TOPIC = "kernel.result"
 class AKernel:
     """Priority-queued dispatcher.
 
-    The queue stores ``(-priority, seq, task)`` tuples so the highest
-    priority runs first and ties break FIFO via a monotonic counter.
-    When ``mc_layer`` is set, after every dispatch the kernel builds a
-    :class:`SystemSnapshot` from a sliding window of recent results and
-    publishes the resulting :class:`MetaCognitionReport` on the
-    ``mc.report`` topic.
+    The default :class:`InMemoryTaskQueue` keeps tasks in process memory;
+    pass a :class:`PersistentTaskQueue` (or any custom :class:`TaskQueue`
+    impl) to get crash-recovery and audit history. When ``mc_layer`` is
+    set, after every dispatch the kernel builds a :class:`SystemSnapshot`
+    from a sliding window of recent results and publishes the resulting
+    :class:`MetaCognitionReport` on the ``mc.report`` topic.
     """
 
     def __init__(
@@ -43,14 +43,14 @@ class AKernel:
         dispatch_timeout_s: float = 30.0,
         mc_layer: MCLayer | None = None,
         snapshot_window: int = 10,
+        task_queue: TaskQueue | None = None,
     ) -> None:
         self.registry = registry
         self.bus = bus
         self.agi_ram = agi_ram
         self.dispatch_timeout_s = dispatch_timeout_s
         self.mc_layer = mc_layer
-        self._queue: asyncio.PriorityQueue[tuple[int, int, AgentTask]] = asyncio.PriorityQueue()
-        self._seq = itertools.count()
+        self.task_queue: TaskQueue = task_queue if task_queue is not None else InMemoryTaskQueue()
         self._stopping = asyncio.Event()
         self._run_task: asyncio.Task[None] | None = None
         self._recent_results: deque[AgentResult] = deque(maxlen=snapshot_window)
@@ -60,7 +60,7 @@ class AKernel:
         self.bus.attach_memory(agi_ram)
 
     async def submit(self, task: AgentTask) -> str:
-        await self._queue.put((-task.priority, next(self._seq), task))
+        await self.task_queue.put(task)
         return task.id
 
     async def build_context(self, task: AgentTask) -> AgentContext:
@@ -170,16 +170,30 @@ class AKernel:
     async def run(self) -> None:
         """Main dispatch loop. Stops when ``shutdown()`` is called."""
         while not self._stopping.is_set():
-            try:
-                _, _, task = await asyncio.wait_for(self._queue.get(), timeout=0.1)
-            except TimeoutError:
+            task = await self.task_queue.get(timeout=0.1)
+            if task is None:
                 continue
+            success = True
+            error: str | None = None
+            elapsed_ms = 0
+            start = time.monotonic()
             try:
-                await self.dispatch(task)
-            except Exception:
+                result = await self.dispatch(task)
+                elapsed_ms = result.elapsed_ms
+                # An agent can mark itself as failed via output["error"];
+                # mirror that into the queue's audit row.
+                if isinstance(result.output, dict) and "error" in result.output:
+                    success = False
+                    error = str(result.output["error"])
+            except Exception as e:
+                success = False
+                error = repr(e)
+                elapsed_ms = int((time.monotonic() - start) * 1000)
                 logger.exception("Dispatch failed for task %s", task.id)
             finally:
-                self._queue.task_done()
+                await self.task_queue.done(
+                    task.id, success=success, elapsed_ms=elapsed_ms, error=error
+                )
 
     def start(self) -> asyncio.Task[None]:
         if self._run_task is not None and not self._run_task.done():
@@ -196,4 +210,4 @@ class AKernel:
 
     @property
     def pending_count(self) -> int:
-        return self._queue.qsize()
+        return self.task_queue.pending_count

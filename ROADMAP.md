@@ -40,18 +40,27 @@ Last updated: 2026-05-02 (after commit `859d2ef`).
 
 These items strengthen the foundation. Order roughly reflects dependency.
 
-### C.1 — On-chain DeSci publication 📋
-- `memory.onchain.OnChainPublisher` ABC with `publish(attestation, node_hash)` → receipt
-- `LocalJSONLPublisher` (default): append-only JSONL `chain` for tests/dev — sequential `block_height`, content-addressed `tx_hash`, prev-block linkage for tamper-evidence
-- `EthereumPublisher` (optional, behind `[chain]` extra): raw RPC POST to a JSON-RPC endpoint, signs/sends a transaction whose calldata is the node hash + ed25519 signature
-- `AGIRam` accepts an optional `publisher`; after a successful `store()` with a signer, asynchronously publishes
-- Closes the last codeable 0% line in the README KPI block
+### C.1 — On-chain DeSci publication ✅
+- `memory.onchain.OnChainPublisher` ABC with `publish(attestation)` → `PublicationReceipt`
+- `LocalJSONLPublisher` (default): append-only JSONL chain — sequential
+  `block_height`, content-addressed `tx_hash`, prev-block linkage,
+  tamper-evident; sqlite ledger as cross-process head lock
+- `AGIRam` accepts an optional `publisher`; after a successful `store()`
+  with a signer, publishes the attestation. Failures logged but never
+  break `store()`. Receipts kept in `ram.receipts[node_id]`.
+- A real-chain `EthereumPublisher` would implement the same ABC
 
-### C.2 — Persistent task queue
-- Currently the kernel's `asyncio.PriorityQueue` is in-memory; a crash mid-dispatch loses queued tasks
-- Move to sqlite-backed durable queue (`kernel.persistent_queue`)
-- On startup, the kernel re-loads pending tasks
-- Optional: leaderboard/audit table of completed tasks with elapsed time + outcome
+### C.2 — Persistent task queue ✅
+- `kernel.queue.TaskQueue` ABC; kernel takes one via `task_queue=` kwarg
+- `InMemoryTaskQueue` is the default (preserves the original
+  `asyncio.PriorityQueue` semantics, including FIFO tiebreak)
+- `PersistentTaskQueue`: sqlite-backed, survives restarts. On startup,
+  any task that was `in_progress` when the previous process died is
+  recovered to `pending` with `attempt_count` bumped; tasks past
+  `max_attempts` get marked `failed` instead of looping forever
+- Audit table records every completed task with elapsed_ms + final state
+- Kernel `run()` now records success/failure metadata via `queue.done()`,
+  including the agent's self-reported error from `output["error"]`
 
 ### C.3 — Structured tracing
 - Per-task `TaskTrace` capturing every span (build_context, agent.execute, MC.monitor, vector upsert, etc.) with timing

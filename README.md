@@ -207,11 +207,12 @@ Simulation engine (Sandbox + Hypothesis): ████████████�
 Min-cut Phi (exact for n ≤ 6):        ████████████████████ 100%
 Sqlite LLM response cache:            ████████████████████ 100%
 On-chain DeSci publication (local JSONL): ████████████████████ 100%
+Persistent task queue + recovery:     ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                323 passing (96% line coverage)
+Tests:                343 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -233,6 +234,12 @@ DeSci publication:    LocalJSONLPublisher gives every attestation real
                       with any block and verify_chain() returns False.
                       OnChainPublisher ABC means a real-chain backend
                       (Ethereum / Polygon) drops in without touching AGIRam.
+Task queue:           InMemoryTaskQueue (default, asyncio.PriorityQueue)
+                      or PersistentTaskQueue (sqlite-backed, durable
+                      across restarts, recovers in-progress tasks with
+                      attempt_count + max_attempts cap, audit history of
+                      every completed task). Both implement TaskQueue ABC;
+                      kernel takes either via task_queue= kwarg.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at
