@@ -198,5 +198,62 @@ async def _submit_and_run(
         await kernel.shutdown()
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    concurrency: int = typer.Option(1, "--concurrency", "-c", min=1, max=64),
+    use_fake_llm: bool = typer.Option(
+        False,
+        "--fake-llm/--real-llm",
+        help="Force the deterministic FakeLLMProvider (default: auto)",
+    ),
+) -> None:
+    """Run the FastAPI server backed by a long-lived kernel.
+
+    The kernel + agents + bus are constructed once on startup and shared
+    across every request. Set ``AWAKING_API_TOKEN`` to require Bearer
+    auth on every endpoint.
+    """
+    try:
+        import uvicorn
+    except ImportError as e:
+        raise typer.BadParameter("serve requires the [http] extra: pip install -e '.[http]'") from e
+
+    from awaking_os.http import create_app
+
+    settings = AwakingSettings()
+    settings.ensure_dirs()
+    logging.basicConfig(level=settings.log_level)
+
+    bus = IACBus()
+    agi_ram = AGIRam(
+        db_path=settings.data_dir / "agi_ram.sqlite",
+        vector_store=InMemoryVectorStore(),
+        embedding_provider=FakeEmbeddingProvider(),
+    )
+    llm = _build_llm(use_fake_llm)
+    mc_layer = MCLayer(
+        phi_calculator=PhiCalculator(),
+        ethical_filter=_build_ethical_filter(llm),
+        global_workspace=GlobalWorkspace(),
+    )
+    registry = AgentRegistry()
+    kernel = AKernel(
+        registry=registry,
+        bus=bus,
+        agi_ram=agi_ram,
+        dispatch_timeout_s=settings.kernel_dispatch_timeout_s,
+        mc_layer=mc_layer,
+        trace_sink=_build_trace_sink(settings),
+        concurrency=concurrency,
+    )
+    for agent in _build_registry(agi_ram, llm, kernel).all():
+        registry.register(agent)
+
+    fastapi_app = create_app(kernel, manage_kernel_lifecycle=True)
+    uvicorn.run(fastapi_app, host=host, port=port, log_level=settings.log_level.lower())
+
+
 if __name__ == "__main__":
     app()

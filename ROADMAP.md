@@ -6,7 +6,7 @@ ROADMAP is what comes after.
 
 Status legend: ✅ shipped · 🚧 in-flight · 📋 planned · 💤 explicitly out of scope
 
-Last updated: 2026-05-03 (after commit `aab4c4a`).
+Last updated: 2026-05-08 (after commit `68bb551`).
 
 ---
 
@@ -170,11 +170,25 @@ These items strengthen the foundation. Order roughly reflects dependency.
 
 ## Phase E — Surface Area & Deployment 📋
 
-### E.1 — HTTP API
-- Today: CLI only
-- Add a FastAPI app exposing `/submit`, `/result/{task_id}`, `/stream` (SSE for live results), `/mc/report`
-- Same agents under the hood; just a different transport
-- Optional Bearer-auth via `AWAKING_API_TOKEN`
+### E.1 — HTTP API ✅
+- `awaking_os.http.create_app(kernel, *, result_cache_size, manage_kernel_lifecycle)`
+  builds a FastAPI app over an existing kernel.
+  Endpoints: `POST /submit`, `GET /result/{task_id}`, `GET /health`,
+  `GET /stream/results`, `GET /stream/traces`, `GET /stream/mc`
+  (SSE via sse-starlette).
+- A FIFO-bounded `_ResultCache` is kept in-app, populated by a
+  background subscriber on `kernel.result`. `GET /result/{task_id}`
+  hits this cache; misses return 404. Re-set on existing keys
+  moves-to-end so a fresh result isn't evicted next.
+- Optional Bearer auth via `AWAKING_API_TOKEN`. Unset = open;
+  set = every endpoint requires `Authorization: Bearer <token>`.
+  Comparison via `secrets.compare_digest` for timing safety.
+- `awaking-os serve --host --port --concurrency` builds the same
+  kernel pipeline as the `submit` CLI but binds it to uvicorn with
+  `manage_kernel_lifecycle=True` so the FastAPI lifespan owns
+  start/shutdown.
+- Pulls in fastapi + uvicorn + sse-starlette via the new
+  `[http]` extra: `pip install -e ".[http]"`.
 
 ### E.2 — Streaming results
 - Today: results are returned only after dispatch completes

@@ -213,11 +213,12 @@ Per-task retry policy + backoff:      ██████████████
 Worker pool / parallel dispatch:      ████████████████████ 100%
 Multi-step reasoning agent:           ████████████████████ 100%
 Persona library + stacking:           ████████████████████ 100%
+HTTP API + SSE streams:               ████████████████████ 100%
 Cleanup + Docs:                       ████████████████████ 100%
 Live bio-signal hardware:             ░░░░░░░░░░░░░░░░░░░░   0%
 On-chain mainnet publication:         ░░░░░░░░░░░░░░░░░░░░   0%
 
-Tests:                427 passing (96% line coverage)
+Tests:                444 passing (96% line coverage)
 IAC Bus:              asyncio pub/sub, multi-subscriber
 Knowledge Graph:      NetworkX + sqlite snapshot, atomic store rollback
 Vector Store:         Chroma (cosine) or in-memory numpy
@@ -278,6 +279,12 @@ Personas:             11 system-prompt fragments — 8 from the original
                       payload["persona"] = ["bael", "vine"] — the LLM
                       sees both fragments concatenated, the composite
                       name + tag union are recorded on the result node.
+HTTP API:             create_app(kernel) builds a FastAPI app exposing
+                      POST /submit, GET /result/{task_id}, GET /health,
+                      and SSE streams for kernel.result / kernel.trace /
+                      mc.report. Optional Bearer auth via
+                      AWAKING_API_TOKEN. Run via `awaking-os serve`
+                      after `pip install -e ".[http]"`.
 ```
 
 > **Wiki note (2026-05-02):** the GitHub wiki at
@@ -333,6 +340,7 @@ For a real LLM, set `ANTHROPIC_API_KEY` (the CLI will pick it up automatically).
 | `AWAKING_LLM_GRADER=1` | Adds an LLM-backed alignment grader to the `EthicalFilter`. The filter combines the LLM score with the rule-based score via `min` — an LLM can never make alignment look better than the rules say, only worse. |
 | `AWAKING_DATA_DIR=/path` | Where AGI-RAM persists the knowledge-graph sqlite (default `.awaking`). |
 | `AWAKING_TRACE_DIR=/path` | Enables `JSONLTraceSink`. Every dispatched task appends one JSON-encoded `TaskTrace` line to `<dir>/traces.jsonl`. |
+| `AWAKING_API_TOKEN=<token>` | Enables Bearer-token auth on every `awaking-os serve` endpoint. Unset = open; set = every request needs `Authorization: Bearer <token>`. |
 
 ---
 
